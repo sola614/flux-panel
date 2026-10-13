@@ -3,13 +3,16 @@ FROM node:20.19.0 AS builder
 
 WORKDIR /app
 
-# 说明：此处必须使用 npm install，不能用 npm ci。
-#   在 Windows / macOS 上生成的 package-lock.json 会按当前平台裁剪 optionalDependencies
-#   （例如 lightningcss、@tailwindcss/oxide 的原生二进制），npm ci 严格按 lockfile 安装，
-#   在 Linux 容器里就会缺少 lightningcss.linux-x64-gnu.node 等文件，导致 vite build 失败。
-#   npm install 仍会遵循 lockfile 中已锁定的版本号，同时按目标平台补装对应的原生依赖。
+# ⚠️ package-lock.json 必须包含「所有平台」的原生 optional 依赖。
+#   若在 Windows / macOS 上生成 lockfile，npm 会按当前平台裁剪掉其他平台的变体
+#   （例如 lightningcss-linux-x64-gnu、@tailwindcss/oxide-linux-x64-gnu），
+#   容器内 vite build 就会报 "Cannot find module './lightningcss.linux-x64-gnu.node'"。
+#   重新生成 lockfile 时，请在 Linux 上、或在一个「没有 node_modules 的空目录」里执行：
+#       mkdir /tmp/lockgen && cp package.json /tmp/lockgen/
+#       cd /tmp/lockgen && npm install --package-lock-only
+#   再把它拷回 vite-frontend/package-lock.json。当前 lockfile 已补齐全部平台变体。
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 RUN npm run build
