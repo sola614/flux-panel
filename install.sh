@@ -398,7 +398,7 @@ apply_mirror() {
     DOWNLOAD_URL=$(build_download_url)
     COUNTRY=$(fetch_text "https://ipinfo.io/country" | tr -d '[:space:]')
     if [ "$COUNTRY" = "CN" ]; then
-        DOWNLOAD_URL="https://ghfast.top/${DOWNLOAD_URL}"
+        DOWNLOAD_URL="https://ghproxy.meaqua.fun/${DOWNLOAD_URL}"
     fi
 }
 

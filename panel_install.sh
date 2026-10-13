@@ -15,9 +15,9 @@ GOST_SQL_URL="https://github.com/sola614/flux-panel/releases/download/1.4.3/gost
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then
     # 拼接 URL
-    DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
-    DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
-    GOST_SQL_URL="https://ghfast.top/${GOST_SQL_URL}"
+    DOCKER_COMPOSEV4_URL="https://ghproxy.meaqua.fun/${DOCKER_COMPOSEV4_URL}"
+    DOCKER_COMPOSEV6_URL="https://ghproxy.meaqua.fun/${DOCKER_COMPOSEV6_URL}"
+    GOST_SQL_URL="https://ghproxy.meaqua.fun/${GOST_SQL_URL}"
 fi
 
 
