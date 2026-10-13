@@ -50,7 +50,7 @@
 - 「已有权限」表格新增 **勾选列 + 全选 + 批量删除**，可一次移除该用户的多个隧道权限。
 - 后端新增接口：`POST /api/v1/tunnel/user/batch-assign`、`POST /api/v1/tunnel/user/batch-remove`；均沿用 `@RequireRole`（仅管理员），批量删除时**逐条校验权限归属该用户**，防止越权。
 
-### 5. 命名空间统一为 `sola614` + 构建链路修复
+### 5. 命名空间统一为 `sola614`、镜像仓库切换至 GHCR + 构建链路修复
 
 **命名空间统一**（原 `bqlpfy/*` → `sola614/*`）
 
@@ -59,6 +59,17 @@
 - 后端：`NodeServiceImpl` 生成的节点安装命令中的脚本下载地址
 - 文档与前端：`README.md` 的安装命令、前端页脚 GitHub 链接（`profile.tsx` / `index.tsx` / `admin.tsx`）
 - iOS：`PRODUCT_BUNDLE_IDENTIFIER` 由 `bqlpfy.flux*` 改为 `sola614.flux*`
+
+**镜像仓库切换为 GitHub Container Registry（GHCR）**
+
+- 镜像地址由 Docker Hub 的 `sola614/*` 改为 **`ghcr.io/sola614/*`**，与代码仓库同源，且**无需再配置任何 Secrets**——登录使用 Actions 内置的 `GITHUB_TOKEN`。
+- `build-vite` / `build-java` 两个任务补充 `permissions: packages: write`，登录步骤改为 `registry: ghcr.io`。
+- `docker buildx build` 增加 `--provenance=false`：不生成 attestation 附属清单，避免旧版 Docker / containerd 拉取多架构镜像时报 `no match for platform in manifest`。
+
+> ⚠️ **首次推送成功后，必须手动把两个 Package 设为 Public**：GHCR 的容器包**默认是 Private**，不会自动继承仓库的公开可见性。请打开
+> `https://github.com/users/sola614/packages/container/vite-frontend/settings`
+> 与 `https://github.com/users/sola614/packages/container/springboot-backend/settings`，
+> 在 *Danger Zone* 中将可见性改为 **Public**。否则 `panel_install.sh` 执行 `docker compose pull` 时会报 `unauthorized`。
 
 **修复 Docker 镜像构建失败（两处硬阻塞）**
 
