@@ -8,7 +8,6 @@ import { Chip } from "@heroui/chip";
 import { Switch } from "@heroui/switch";
 import { Spinner } from "@heroui/spinner";
 import { Alert } from "@heroui/alert";
-import { Progress } from "@heroui/progress";
 import toast from 'react-hot-toast';
 import axios from 'axios';
 
@@ -18,6 +17,7 @@ import {
   getNodeList, 
   updateNode, 
   deleteNode,
+  batchDeleteNodes,
   getNodeInstallCommand
 } from "@/api";
 
@@ -34,15 +34,6 @@ interface Node {
   socks?: number; // 0 关 1 开
   status: number; // 1: 在线, 0: 离线
   connectionStatus: 'online' | 'offline';
-  systemInfo?: {
-    cpuUsage: number;
-    memoryUsage: number;
-    uploadTraffic: number;
-    downloadTraffic: number;
-    uploadSpeed: number;
-    downloadSpeed: number;
-    uptime: number;
-  } | null;
   copyLoading?: boolean;
 }
 
@@ -70,6 +61,12 @@ export default function NodePage() {
   const [nodeToDelete, setNodeToDelete] = useState<Node | null>(null);
   const [protocolDisabled, setProtocolDisabled] = useState(false);
   const [protocolDisabledReason, setProtocolDisabledReason] = useState('');
+
+  // 批量操作相关状态
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+
   const [form, setForm] = useState<NodeForm>({
     id: null,
     name: '',
@@ -111,7 +108,6 @@ export default function NodePage() {
         setNodeList(res.data.map((node: any) => ({
           ...node,
           connectionStatus: node.status === 1 ? 'online' : 'offline',
-          systemInfo: null,
           copyLoading: false
         })));
       } else {
@@ -170,6 +166,8 @@ export default function NodePage() {
   };
 
   // 处理WebSocket消息
+  // 说明：节点上报已简化为"仅上报在线状态"，服务端通过 WebSocket 连接建立/断开来判定在线/离线，
+  // 因此这里只需处理 status 类型消息；info 类型（节点心跳）仅用于确认节点仍在线。
   const handleWebSocketMessage = (data: any) => {
     const { id, type, data: messageData } = data;
     
@@ -178,69 +176,19 @@ export default function NodePage() {
         if (node.id == id) {
           return {
             ...node,
-            connectionStatus: messageData === 1 ? 'online' : 'offline',
-            systemInfo: messageData === 0 ? null : node.systemInfo
+            connectionStatus: messageData === 1 ? 'online' : 'offline'
           };
         }
         return node;
       }));
     } else if (type === 'info') {
+      // 心跳：确认节点在线
       setNodeList(prev => prev.map(node => {
         if (node.id == id) {
-          try {
-            let systemInfo;
-            if (typeof messageData === 'string') {
-              systemInfo = JSON.parse(messageData);
-            } else {
-              systemInfo = messageData;
-            }
-            
-            const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
-            const currentDownload = parseInt(systemInfo.bytes_received) || 0;
-            const currentUptime = parseInt(systemInfo.uptime) || 0;
-            
-            let uploadSpeed = 0;
-            let downloadSpeed = 0;
-            
-            if (node.systemInfo && node.systemInfo.uptime) {
-              const timeDiff = currentUptime - node.systemInfo.uptime;
-              
-              if (timeDiff > 0 && timeDiff <= 10) {
-                const lastUpload = node.systemInfo.uploadTraffic || 0;
-                const lastDownload = node.systemInfo.downloadTraffic || 0;
-                
-                const uploadDiff = currentUpload - lastUpload;
-                const downloadDiff = currentDownload - lastDownload;
-                
-                const uploadReset = currentUpload < lastUpload;
-                const downloadReset = currentDownload < lastDownload;
-                
-                if (!uploadReset && uploadDiff >= 0) {
-                  uploadSpeed = uploadDiff / timeDiff;
-                }
-                
-                if (!downloadReset && downloadDiff >= 0) {
-                  downloadSpeed = downloadDiff / timeDiff;
-                }
-              }
-            }
-            
-            return {
-              ...node,
-              connectionStatus: 'online',
-              systemInfo: {
-                cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
-                memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
-                uploadTraffic: currentUpload,
-                downloadTraffic: currentDownload,
-                uploadSpeed: uploadSpeed,
-                downloadSpeed: downloadSpeed,
-                uptime: currentUptime
-              }
-            };
-          } catch (error) {
-            return node;
-          }
+          return {
+            ...node,
+            connectionStatus: 'online'
+          };
         }
         return node;
       }));
@@ -283,58 +231,8 @@ export default function NodePage() {
     
     setNodeList(prev => prev.map(node => ({
       ...node,
-      connectionStatus: 'offline',
-      systemInfo: null
+      connectionStatus: 'offline'
     })));
-  };
-
-
-  
-  // 格式化速度
-  const formatSpeed = (bytesPerSecond: number): string => {
-    if (bytesPerSecond === 0) return '0 B/s';
-    
-    const k = 1024;
-    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
-    const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k));
-    
-    return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  // 格式化开机时间
-  const formatUptime = (seconds: number): string => {
-    if (seconds === 0) return '-';
-    
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    
-    if (days > 0) {
-      return `${days}天${hours}小时`;
-    } else if (hours > 0) {
-      return `${hours}小时${minutes}分钟`;
-    } else {
-      return `${minutes}分钟`;
-    }
-  };
-
-  // 格式化流量
-  const formatTraffic = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  // 获取进度条颜色
-  const getProgressColor = (value: number, offline = false): "default" | "primary" | "secondary" | "success" | "warning" | "danger" => {
-    if (offline) return "default";
-    if (value <= 50) return "success";
-    if (value <= 80) return "warning";
-    return "danger";
   };
 
   // 验证IP地址格式
@@ -456,6 +354,7 @@ export default function NodePage() {
       if (res.code === 0) {
         toast.success('删除成功');
         setNodeList(prev => prev.filter(n => n.id !== nodeToDelete.id));
+        setSelectedIds(prev => prev.filter(id => id !== nodeToDelete.id));
         setDeleteModalOpen(false);
         setNodeToDelete(null);
       } else {
@@ -465,6 +364,53 @@ export default function NodePage() {
       toast.error('网络错误，请重试');
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  // ============ 批量操作 ============
+
+  // 切换单个选中状态
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  // 是否全部选中
+  const allSelected = nodeList.length > 0 && selectedIds.length === nodeList.length;
+
+  // 全选/取消全选
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? [] : nodeList.map(n => n.id));
+  };
+
+  // 批量删除
+  const confirmBatchDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const res = await batchDeleteNodes(selectedIds);
+      if (res.code === 0) {
+        const result = res.data || {};
+        const successCount = result.success ?? 0;
+        const failedCount = result.failed ?? 0;
+        if (failedCount > 0) {
+          const reasons = (result.failures || [])
+            .map((f: any) => `#${f.id}: ${f.reason}`)
+            .join('；');
+          toast.error(`批量删除完成：成功 ${successCount} 项，失败 ${failedCount} 项。${reasons}`);
+        } else {
+          toast.success(`批量删除成功，共 ${successCount} 项`);
+        }
+        const failedIds = (result.failures || []).map((f: any) => Number(f.id));
+        setNodeList(prev => prev.filter(n => !selectedIds.includes(n.id) || failedIds.includes(n.id)));
+        setSelectedIds([]);
+        setBatchDeleteModalOpen(false);
+      } else {
+        toast.error(res.msg || '批量删除失败');
+      }
+    } catch (error) {
+      toast.error('网络错误，请重试');
+    } finally {
+      setBatchDeleting(false);
     }
   };
 
@@ -592,11 +538,33 @@ export default function NodePage() {
     
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
-        <div className="flex items-center justify-between mb-6">
-        <div className="flex-1">
-        </div>
+        <div className="flex items-center justify-between mb-6 gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            {nodeList.length > 0 && (
+              <Button
+                size="sm"
+                variant="flat"
+                onPress={toggleSelectAll}
+              >
+                {allSelected ? '取消全选' : '全选'}
+              </Button>
+            )}
+            {selectedIds.length > 0 && (
+              <>
+                <span className="text-sm text-default-600">已选 {selectedIds.length} 项</span>
+                <Button
+                  size="sm"
+                  variant="flat"
+                  color="danger"
+                  onPress={() => setBatchDeleteModalOpen(true)}
+                >
+                  批量删除
+                </Button>
+              </>
+            )}
+          </div>
 
-        <Button
+          <Button
               size="sm"
               variant="flat"
               color="primary"
@@ -637,13 +605,22 @@ export default function NodePage() {
             {nodeList.map((node) => (
               <Card 
                 key={node.id} 
-                className="shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
+                className={`shadow-sm border transition-shadow duration-200 hover:shadow-md ${selectedIds.includes(node.id) ? 'border-primary-400 ring-1 ring-primary-300' : 'border-divider'}`}
               >
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start w-full">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground truncate text-sm">{node.name}</h3>
-                      <p className="text-xs text-default-500 truncate">{node.serverIp}</p>
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 accent-primary cursor-pointer flex-shrink-0"
+                        checked={selectedIds.includes(node.id)}
+                        onChange={() => toggleSelect(node.id)}
+                        aria-label={`选择节点 ${node.name}`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-foreground truncate text-sm">{node.name}</h3>
+                        <p className="text-xs text-default-500 truncate">{node.serverIp}</p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-1.5 ml-2">
                       <Chip 
@@ -686,102 +663,10 @@ export default function NodePage() {
                       <span className="text-xs">{node.version || '未知'}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-default-600">开机时间</span>
+                      <span className="text-default-600">状态</span>
                       <span className="text-xs">
-                        {node.connectionStatus === 'online' && node.systemInfo 
-                          ? formatUptime(node.systemInfo.uptime)
-                          : '-'
-                        }
+                        {node.connectionStatus === 'online' ? '在线' : '离线'}
                       </span>
-                    </div>
-                  </div>
-
-                  {/* 系统监控 */}
-                  <div className="space-y-3 mb-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span>CPU</span>
-                          <span className="font-mono">
-                            {node.connectionStatus === 'online' && node.systemInfo 
-                              ? `${node.systemInfo.cpuUsage.toFixed(1)}%` 
-                              : '-'
-                            }
-                          </span>
-                        </div>
-                        <Progress
-                          value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0}
-                          color={getProgressColor(
-                            node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0,
-                            node.connectionStatus !== 'online'
-                          )}
-                          size="sm"
-                          aria-label="CPU使用率"
-                        />
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span>内存</span>
-                          <span className="font-mono">
-                            {node.connectionStatus === 'online' && node.systemInfo 
-                              ? `${node.systemInfo.memoryUsage.toFixed(1)}%` 
-                              : '-'
-                            }
-                          </span>
-                        </div>
-                        <Progress
-                          value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0}
-                          color={getProgressColor(
-                            node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0,
-                            node.connectionStatus !== 'online'
-                          )}
-                          size="sm"
-                          aria-label="内存使用率"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="text-center p-2 bg-default-50 dark:bg-default-100 rounded">
-                        <div className="text-default-600 mb-0.5">上传</div>
-                        <div className="font-mono">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatSpeed(node.systemInfo.uploadSpeed) 
-                            : '-'
-                          }
-                        </div>
-                      </div>
-                      <div className="text-center p-2 bg-default-50 dark:bg-default-100 rounded">
-                        <div className="text-default-600 mb-0.5">下载</div>
-                        <div className="font-mono">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatSpeed(node.systemInfo.downloadSpeed) 
-                            : '-'
-                          }
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 流量统计 */}
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="text-center p-2 bg-primary-50 dark:bg-primary-100/20 rounded border border-primary-200 dark:border-primary-300/20">
-                        <div className="text-primary-600 dark:text-primary-400 mb-0.5">↑ 上行流量</div>
-                        <div className="font-mono text-primary-700 dark:text-primary-300">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatTraffic(node.systemInfo.uploadTraffic) 
-                            : '-'
-                          }
-                        </div>
-                      </div>
-                      <div className="text-center p-2 bg-success-50 dark:bg-success-100/20 rounded border border-success-200 dark:border-success-300/20">
-                        <div className="text-success-600 dark:text-success-400 mb-0.5">↓ 下行流量</div>
-                        <div className="font-mono text-success-700 dark:text-success-300">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatTraffic(node.systemInfo.downloadTraffic) 
-                            : '-'
-                          }
-                        </div>
-                      </div>
                     </div>
                   </div>
 
@@ -1038,6 +923,45 @@ export default function NodePage() {
           </ModalContent>
         </Modal>
 
+        {/* 批量删除确认模态框 */}
+        <Modal
+          isOpen={batchDeleteModalOpen}
+          onOpenChange={setBatchDeleteModalOpen}
+          size="2xl"
+          scrollBehavior="outside"
+          backdrop="blur"
+          placement="center"
+        >
+          <ModalContent>
+            {(onClose) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-xl font-bold">确认批量删除</h2>
+                </ModalHeader>
+                <ModalBody>
+                  <p>确定要删除选中的 <strong>{selectedIds.length}</strong> 个节点吗？</p>
+                  <p className="text-small text-default-500">
+                    被隧道引用的节点将删除失败，删除结果会逐条提示。
+                  </p>
+                  <p className="text-small text-default-500">此操作不可恢复，请谨慎操作。</p>
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="light" onPress={onClose}>
+                    取消
+                  </Button>
+                  <Button
+                    color="danger"
+                    onPress={confirmBatchDelete}
+                    isLoading={batchDeleting}
+                  >
+                    {batchDeleting ? '删除中...' : '确认删除'}
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
         {/* 安装命令模态框 */}
         <Modal 
           isOpen={installCommandModal} 
@@ -1094,4 +1018,4 @@ export default function NodePage() {
       </div>
     
   );
-} 
+}

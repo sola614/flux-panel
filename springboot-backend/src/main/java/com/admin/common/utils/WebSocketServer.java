@@ -76,8 +76,8 @@ public class WebSocketServer extends TextWebSocketHandler {
                 // 尝试解密消息
                 String decryptedPayload = decryptMessageIfNeeded(message.getPayload(), nodeSecret);
 
-                if (decryptedPayload.contains("memory_usage")){
-                    // 先发送确认消息
+                if (decryptedPayload.contains("\"online\"")){
+                    // 节点在线心跳（已简化：仅上报在线状态），先发送确认消息
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                 }else if (decryptedPayload.contains("requestId")) {
                     log.info("收到消息: {}", decryptedPayload);

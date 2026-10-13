@@ -45,6 +45,22 @@ public interface ForwardService extends IService<Forward> {
     R deleteForward(Long id);
 
     /**
+     * 批量删除端口转发
+     * 逐条复用单条删除逻辑，聚合成功/失败明细
+     * @param ids 转发ID列表
+     * @return 批量结果
+     */
+    R batchDeleteForwards(java.util.List<Long> ids);
+
+    /**
+     * 批量强制删除端口转发
+     * 跳过GOST节点验证，直接删除数据库记录
+     * @param ids 转发ID列表
+     * @return 批量结果
+     */
+    R batchForceDeleteForwards(java.util.List<Long> ids);
+
+    /**
      * 强制删除端口转发
      * 跳过GOST节点验证，直接删除数据库记录
      * @param id 转发ID

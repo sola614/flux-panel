@@ -16,6 +16,7 @@ import {
   getTunnelList, 
   updateTunnel, 
   deleteTunnel,
+  batchDeleteTunnels,
   getNodeList,
   diagnoseTunnel
 } from "@/api";
@@ -92,6 +93,11 @@ export default function TunnelPage() {
   const [tunnelToDelete, setTunnelToDelete] = useState<Tunnel | null>(null);
   const [currentDiagnosisTunnel, setCurrentDiagnosisTunnel] = useState<Tunnel | null>(null);
   const [diagnosisResult, setDiagnosisResult] = useState<DiagnosisResult | null>(null);
+
+  // 批量操作相关状态
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   
   // 表单状态
   const [form, setForm] = useState<TunnelForm>({
@@ -252,6 +258,49 @@ export default function TunnelPage() {
       toast.error('删除失败');
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  // ============ 批量操作 ============
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const allSelected = tunnels.length > 0 && selectedIds.length === tunnels.length;
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? [] : tunnels.map(t => t.id));
+  };
+
+  const confirmBatchDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const response = await batchDeleteTunnels(selectedIds);
+      if (response.code === 0) {
+        const result = response.data || {};
+        const successCount = result.success ?? 0;
+        const failedCount = result.failed ?? 0;
+        if (failedCount > 0) {
+          const reasons = (result.failures || [])
+            .map((f: any) => `#${f.id}: ${f.reason}`)
+            .join('；');
+          toast.error(`批量删除完成：成功 ${successCount} 项，失败 ${failedCount} 项。${reasons}`);
+        } else {
+          toast.success(`批量删除成功，共 ${successCount} 项`);
+        }
+        setSelectedIds([]);
+        setBatchDeleteModalOpen(false);
+        loadData();
+      } else {
+        toast.error(response.msg || '批量删除失败');
+      }
+    } catch (error) {
+      console.error('批量删除失败:', error);
+      toast.error('网络错误，请重试');
+    } finally {
+      setBatchDeleting(false);
     }
   };
 
@@ -427,11 +476,33 @@ export default function TunnelPage() {
     
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
-        <div className="flex items-center justify-between mb-6">
-        <div className="flex-1">
-        </div>
+        <div className="flex items-center justify-between mb-6 gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            {tunnels.length > 0 && (
+              <Button
+                size="sm"
+                variant="flat"
+                onPress={toggleSelectAll}
+              >
+                {allSelected ? '取消全选' : '全选'}
+              </Button>
+            )}
+            {selectedIds.length > 0 && (
+              <>
+                <span className="text-sm text-default-600">已选 {selectedIds.length} 项</span>
+                <Button
+                  size="sm"
+                  variant="flat"
+                  color="danger"
+                  onPress={() => setBatchDeleteModalOpen(true)}
+                >
+                  批量删除
+                </Button>
+              </>
+            )}
+          </div>
 
-        <Button
+          <Button
               size="sm"
               variant="flat"
               color="primary"
@@ -451,28 +522,37 @@ export default function TunnelPage() {
               const typeDisplay = getTypeDisplay(tunnel.type);
               
               return (
-                <Card key={tunnel.id} className="shadow-sm border border-divider hover:shadow-md transition-shadow duration-200">
+                <Card key={tunnel.id} className={`shadow-sm border transition-shadow duration-200 hover:shadow-md ${selectedIds.includes(tunnel.id) ? 'border-primary-400 ring-1 ring-primary-300' : 'border-divider'}`}>
                   <CardHeader className="pb-2">
                     <div className="flex justify-between items-start w-full">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-foreground truncate text-sm">{tunnel.name}</h3>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <Chip 
-                            color={typeDisplay.color as any} 
-                            variant="flat" 
-                            size="sm"
-                            className="text-xs"
-                          >
-                            {typeDisplay.text}
-                          </Chip>
-                          <Chip 
-                            color={statusDisplay.color as any} 
-                            variant="flat" 
-                            size="sm"
-                            className="text-xs"
-                          >
-                            {statusDisplay.text}
-                          </Chip>
+                      <div className="flex items-start gap-2 flex-1 min-w-0">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-primary cursor-pointer flex-shrink-0"
+                          checked={selectedIds.includes(tunnel.id)}
+                          onChange={() => toggleSelect(tunnel.id)}
+                          aria-label={`选择隧道 ${tunnel.name}`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-foreground truncate text-sm">{tunnel.name}</h3>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <Chip 
+                              color={typeDisplay.color as any} 
+                              variant="flat" 
+                              size="sm"
+                              className="text-xs"
+                            >
+                              {typeDisplay.text}
+                            </Chip>
+                            <Chip 
+                              color={statusDisplay.color as any} 
+                              variant="flat" 
+                              size="sm"
+                              className="text-xs"
+                            >
+                              {statusDisplay.text}
+                            </Chip>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -905,6 +985,45 @@ export default function TunnelPage() {
                     isLoading={deleteLoading}
                   >
                     {deleteLoading ? '删除中...' : '确认删除'}
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* 批量删除确认模态框 */}
+        <Modal
+          isOpen={batchDeleteModalOpen}
+          onOpenChange={setBatchDeleteModalOpen}
+          size="2xl"
+          scrollBehavior="outside"
+          backdrop="blur"
+          placement="center"
+        >
+          <ModalContent>
+            {(onClose) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-xl font-bold">确认批量删除</h2>
+                </ModalHeader>
+                <ModalBody>
+                  <p>确定要删除选中的 <strong>{selectedIds.length}</strong> 个隧道吗？</p>
+                  <p className="text-small text-default-500">
+                    存在转发或用户权限关联的隧道将删除失败，删除结果会逐条提示。
+                  </p>
+                  <p className="text-small text-default-500">此操作不可恢复，请谨慎操作。</p>
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="light" onPress={onClose}>
+                    取消
+                  </Button>
+                  <Button
+                    color="danger"
+                    onPress={confirmBatchDelete}
+                    isLoading={batchDeleting}
+                  >
+                    {batchDeleting ? '删除中...' : '确认删除'}
                   </Button>
                 </ModalFooter>
               </>

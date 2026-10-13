@@ -6,6 +6,7 @@ import com.admin.common.dto.GostDto;
 import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.lang.R;
+import com.admin.common.utils.BatchResultUtil;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.Node;
 import com.admin.entity.Tunnel;
@@ -24,7 +25,9 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -199,6 +202,36 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     }
 
     /**
+     * 批量删除节点
+     * 逐条复用单条删除逻辑（含隧道占用校验），聚合成功/失败明细，支持部分成功
+     *
+     * @param ids 节点ID列表
+     * @return 批量结果
+     */
+    @Override
+    public R batchDeleteNodes(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return R.err("请选择要删除的节点");
+        }
+
+        List<Map<String, Object>> failures = new ArrayList<>();
+        int success = 0;
+        for (Long id : ids) {
+            try {
+                R result = this.deleteNode(id);
+                if (result.getCode() == 0) {
+                    success++;
+                } else {
+                    failures.add(BatchResultUtil.failure(id, result.getMsg()));
+                }
+            } catch (Exception e) {
+                failures.add(BatchResultUtil.failure(id, e.getMessage()));
+            }
+        }
+        return BatchResultUtil.result(ids.size(), success, failures);
+    }
+
+    /**
      * 根据ID获取节点信息
      * 
      * @param id 节点ID
@@ -363,7 +396,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         StringBuilder command = new StringBuilder();
         
         // 第一部分：下载安装脚本  
-        command.append("curl -L https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/install.sh")
+        command.append("curl -L https://github.com/sola614/flux-panel/releases/download/1.4.3/install.sh")
                .append(" -o ./install.sh && chmod +x ./install.sh && ");
         
         // 处理服务器地址，如果是IPv6需要添加方括号

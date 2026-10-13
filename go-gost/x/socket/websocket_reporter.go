@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync" // 新增：用于管理连接状态的互斥锁
 	"time"
 
@@ -17,36 +16,16 @@ import (
 	"github.com/go-gost/x/internal/util/crypto"
 	"github.com/go-gost/x/service"
 	"github.com/gorilla/websocket"
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/mem"
-	psnet "github.com/shirou/gopsutil/v3/net"
 	"os"
 )
 
-// SystemInfo 系统信息结构体
-type SystemInfo struct {
-	Uptime           uint64  `json:"uptime"`            // 开机时间	（秒）
-	BytesReceived    uint64  `json:"bytes_received"`    // 接收字节数
-	BytesTransmitted uint64  `json:"bytes_transmitted"` // 发送字节数
-	CPUUsage         float64 `json:"cpu_usage"`         // CPU使用率（百分比）
-	MemoryUsage      float64 `json:"memory_usage"`      // 内存使用率（百分比）
-}
-
-// NetworkStats 网络统计信息
-type NetworkStats struct {
-	BytesReceived    uint64 `json:"bytes_received"`    // 接收字节数
-	BytesTransmitted uint64 `json:"bytes_transmitted"` // 发送字节数
-}
-
-// CPUInfo CPU信息
-type CPUInfo struct {
-	Usage float64 `json:"usage"` // CPU使用率（百分比）
-}
-
-// MemoryInfo 内存信息
-type MemoryInfo struct {
-	Usage float64 `json:"usage"` // 内存使用率（百分比）
+// Heartbeat 节点心跳（已简化：仅上报在线状态）
+// 说明：节点在线/离线由 WebSocket 连接的建立与断开来判定，
+// 定时心跳仅用于保持连接活跃并让服务端确认节点仍在线；
+// 不再采集 CPU/内存/网络等指标，以降低小内存机器（如 64M Alpine）的 OOM 风险。
+type Heartbeat struct {
+	Online    bool  `json:"online"`    // 固定为 true，表示节点在线
+	Timestamp int64 `json:"timestamp"` // 心跳时间戳（秒）
 }
 
 // CommandMessage 命令消息结构体
@@ -118,7 +97,7 @@ func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 	return &WebSocketReporter{
 		url:            serverURL,
 		reconnectTime:  5 * time.Second,  // 重连间隔
-		pingInterval:   2 * time.Second,  // 发送间隔改为2秒
+		pingInterval:   30 * time.Second, // 心跳间隔（简化为在线心跳，降低频率与内存占用）
 		configInterval: 10 * time.Minute, // 配置上报间隔
 		ctx:            ctx,
 		cancel:         cancel,
@@ -284,33 +263,26 @@ func (w *WebSocketReporter) handleConnection() {
 				return
 			}
 
-			// 获取系统信息并发送
-			sysInfo := w.collectSystemInfo()
-			if err := w.sendSystemInfo(sysInfo); err != nil {
-				fmt.Printf("❌ 发送系统信息失败: %v，准备重连\n", err)
+			// 发送在线心跳（不再采集系统指标）
+			heartbeat := w.buildHeartbeat()
+			if err := w.sendHeartbeat(heartbeat); err != nil {
+				fmt.Printf("❌ 发送心跳失败: %v，准备重连\n", err)
 				return
 			}
 		}
 	}
 }
 
-// collectSystemInfo 收集系统信息
-func (w *WebSocketReporter) collectSystemInfo() SystemInfo {
-	networkStats := getNetworkStats()
-	cpuInfo := getCPUInfo()
-	memoryInfo := getMemoryInfo()
-
-	return SystemInfo{
-		Uptime:           getUptime(),
-		BytesReceived:    networkStats.BytesReceived,
-		BytesTransmitted: networkStats.BytesTransmitted,
-		CPUUsage:         cpuInfo.Usage,
-		MemoryUsage:      memoryInfo.Usage,
+// buildHeartbeat 构建在线心跳
+func (w *WebSocketReporter) buildHeartbeat() Heartbeat {
+	return Heartbeat{
+		Online:    true,
+		Timestamp: time.Now().Unix(),
 	}
 }
 
-// sendSystemInfo 发送系统信息
-func (w *WebSocketReporter) sendSystemInfo(sysInfo SystemInfo) error {
+// sendHeartbeat 发送在线心跳
+func (w *WebSocketReporter) sendHeartbeat(heartbeat Heartbeat) error {
 	w.connMutex.Lock()
 	defer w.connMutex.Unlock()
 
@@ -319,9 +291,9 @@ func (w *WebSocketReporter) sendSystemInfo(sysInfo SystemInfo) error {
 	}
 
 	// 转换为JSON
-	jsonData, err := json.Marshal(sysInfo)
+	jsonData, err := json.Marshal(heartbeat)
 	if err != nil {
-		return fmt.Errorf("序列化系统信息失败: %v", err)
+		return fmt.Errorf("序列化心跳失败: %v", err)
 	}
 
 	var messageData []byte
@@ -354,7 +326,7 @@ func (w *WebSocketReporter) sendSystemInfo(sysInfo SystemInfo) error {
 
 	if err := w.conn.WriteMessage(websocket.TextMessage, messageData); err != nil {
 		w.connected = false // 标记连接已断开
-		return fmt.Errorf("写入消息失败: %v", err)
+		return fmt.Errorf("写入心跳失败: %v", err)
 	}
 
 	return nil
@@ -977,66 +949,6 @@ func (w *WebSocketReporter) sendErrorResponse(responseType, message string) {
 		Message: message,
 	}
 	w.sendResponse(response)
-}
-
-// getUptime 获取系统开机时间（秒）
-func getUptime() uint64 {
-	uptime, err := host.Uptime()
-	if err != nil {
-		return 0
-	}
-	return uptime
-}
-
-// getNetworkStats 获取网络统计信息
-func getNetworkStats() NetworkStats {
-	var stats NetworkStats
-
-	ioCounters, err := psnet.IOCounters(true)
-	if err != nil {
-		fmt.Printf("获取网络统计失败: %v\n", err)
-		return stats
-	}
-
-	// 汇总所有非回环接口的流量
-	for _, io := range ioCounters {
-		// 跳过回环接口
-		if io.Name == "lo" || strings.HasPrefix(io.Name, "lo") {
-			continue
-		}
-
-		stats.BytesReceived += io.BytesRecv
-		stats.BytesTransmitted += io.BytesSent
-	}
-
-	return stats
-}
-
-// getCPUInfo 获取CPU信息
-func getCPUInfo() CPUInfo {
-	var cpuInfo CPUInfo
-
-	// 获取CPU使用率
-	percentages, err := cpu.Percent(time.Second, false)
-	if err == nil && len(percentages) > 0 {
-		cpuInfo.Usage = percentages[0]
-	}
-
-	return cpuInfo
-}
-
-// getMemoryInfo 获取内存信息
-func getMemoryInfo() MemoryInfo {
-	var memInfo MemoryInfo
-
-	vmStat, err := mem.VirtualMemory()
-	if err != nil {
-		return memInfo
-	}
-
-	memInfo.Usage = vmStat.UsedPercent
-
-	return memInfo
 }
 
 // StartWebSocketReporterWithConfig 使用配置字段启动WebSocket报告器

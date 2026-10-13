@@ -9,6 +9,7 @@ import com.admin.common.lang.R;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -52,6 +53,22 @@ public class NodeController extends BaseController {
     public R delete(@RequestBody Map<String, Object> params) {
         Long id = Long.valueOf(params.get("id").toString());
         return nodeService.deleteNode(id);
+    }
+
+    /**
+     * 批量删除节点
+     * @param params 包含 ids 数组的参数
+     * @return 批量结果（含成功/失败明细）
+     */
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/batch-delete")
+    public R batchDelete(@RequestBody Map<String, Object> params) {
+        List<Long> ids = parseIds(params);
+        if (ids == null) {
+            return R.err("请选择要删除的节点");
+        }
+        return nodeService.batchDeleteNodes(ids);
     }
 
     @LogAnnotation

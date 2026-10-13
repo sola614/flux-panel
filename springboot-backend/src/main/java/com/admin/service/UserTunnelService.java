@@ -1,5 +1,6 @@
 package com.admin.service;
 
+import com.admin.common.dto.UserTunnelBatchDto;
 import com.admin.common.dto.UserTunnelDto;
 import com.admin.common.dto.UserTunnelQueryDto;
 import com.admin.common.dto.UserTunnelUpdateDto;
@@ -37,6 +38,23 @@ public interface UserTunnelService extends IService<UserTunnel> {
      * @return 结果
      */
     R removeUserTunnel(Integer id);
+
+    /**
+     * 批量分配用户隧道权限
+     * 为同一用户一次性分配多个隧道，共享同一套流量/数量/到期配置
+     * @param batchDto 批量分配数据
+     * @return 批量结果（含成功/失败明细）
+     */
+    R batchAssignUserTunnels(UserTunnelBatchDto batchDto);
+
+    /**
+     * 批量删除用户隧道权限
+     * 逐条校验权限归属该用户后删除，聚合成功/失败明细
+     * @param userId 用户ID
+     * @param ids    用户隧道权限ID列表
+     * @return 批量结果（含成功/失败明细）
+     */
+    R batchRemoveUserTunnels(Integer userId, java.util.List<Integer> ids);
 
     
     /**

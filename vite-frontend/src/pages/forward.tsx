@@ -38,6 +38,8 @@ import {
   updateForward, 
   deleteForward,
   forceDeleteForward,
+  batchDeleteForwards,
+  batchForceDeleteForwards,
   userTunnel, 
   pauseForwardService,
   resumeForwardService,
@@ -165,6 +167,12 @@ export default function ForwardPage() {
   const [diagnosisResult, setDiagnosisResult] = useState<DiagnosisResult | null>(null);
   const [addressModalTitle, setAddressModalTitle] = useState('');
   const [addressList, setAddressList] = useState<AddressItem[]>([]);
+
+  // 批量操作相关状态
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [batchForceDelete, setBatchForceDelete] = useState(false);
   
   // 导出相关状态
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -506,6 +514,53 @@ export default function ForwardPage() {
       toast.error('删除失败');
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  // ============ 批量操作 ============
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const allSelected = forwards.length > 0 && selectedIds.length === forwards.length;
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? [] : forwards.map(f => f.id));
+  };
+
+  // 批量删除转发（支持常规/强制两种模式）
+  const confirmBatchDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const res = batchForceDelete
+        ? await batchForceDeleteForwards(selectedIds)
+        : await batchDeleteForwards(selectedIds);
+      if (res.code === 0) {
+        const result = res.data || {};
+        const successCount = result.success ?? 0;
+        const failedCount = result.failed ?? 0;
+        if (failedCount > 0) {
+          const reasons = (result.failures || [])
+            .map((f: any) => `#${f.id}: ${f.reason}`)
+            .join('；');
+          toast.error(`批量删除完成：成功 ${successCount} 项，失败 ${failedCount} 项。${reasons}`);
+        } else {
+          toast.success(`批量删除成功，共 ${successCount} 项`);
+        }
+        setSelectedIds([]);
+        setBatchDeleteModalOpen(false);
+        setBatchForceDelete(false);
+        loadData();
+      } else {
+        toast.error(res.msg || '批量删除失败');
+      }
+    } catch (error) {
+      console.error('批量删除失败:', error);
+      toast.error('网络错误，请重试');
+    } finally {
+      setBatchDeleting(false);
     }
   };
 
@@ -1178,12 +1233,21 @@ export default function ForwardPage() {
     const strategyDisplay = getStrategyDisplay(forward.strategy);
     
     return (
-      <Card key={forward.id} className="group shadow-sm border border-divider hover:shadow-md transition-shadow duration-200">
+      <Card key={forward.id} className={`group shadow-sm border transition-shadow duration-200 hover:shadow-md ${selectedIds.includes(forward.id) ? 'border-primary-400 ring-1 ring-primary-300' : 'border-divider'}`}>
         <CardHeader className="pb-2">
           <div className="flex justify-between items-start w-full">
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-foreground truncate text-sm">{forward.name}</h3>
-              <p className="text-xs text-default-500 truncate">{forward.tunnelName}</p>
+            <div className="flex items-start gap-2 flex-1 min-w-0">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-primary cursor-pointer flex-shrink-0"
+                checked={selectedIds.includes(forward.id)}
+                onChange={() => toggleSelect(forward.id)}
+                aria-label={`选择转发 ${forward.name}`}
+              />
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-foreground truncate text-sm">{forward.name}</h3>
+                <p className="text-xs text-default-500 truncate">{forward.tunnelName}</p>
+              </div>
             </div>
             <div className="flex items-center gap-1.5 ml-2">
               {viewMode === 'direct' && (
@@ -1355,8 +1419,30 @@ export default function ForwardPage() {
     
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex-1">
+        <div className="flex items-center justify-between mb-6 gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            {forwards.length > 0 && (
+              <Button
+                size="sm"
+                variant="flat"
+                onPress={toggleSelectAll}
+              >
+                {allSelected ? '取消全选' : '全选'}
+              </Button>
+            )}
+            {selectedIds.length > 0 && (
+              <>
+                <span className="text-sm text-default-600">已选 {selectedIds.length} 项</span>
+                <Button
+                  size="sm"
+                  variant="flat"
+                  color="danger"
+                  onPress={() => setBatchDeleteModalOpen(true)}
+                >
+                  批量删除
+                </Button>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-3">
             {/* 显示模式切换按钮 */}
@@ -1709,6 +1795,60 @@ export default function ForwardPage() {
                     isLoading={deleteLoading}
                   >
                     确认删除
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* 批量删除确认模态框 */}
+        <Modal
+          isOpen={batchDeleteModalOpen}
+          onOpenChange={(open) => {
+            setBatchDeleteModalOpen(open);
+            if (!open) setBatchForceDelete(false);
+          }}
+          size="2xl"
+          scrollBehavior="outside"
+          backdrop="blur"
+          placement="center"
+        >
+          <ModalContent>
+            {(onClose) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-lg font-bold text-danger">确认批量删除</h2>
+                </ModalHeader>
+                <ModalBody>
+                  <p className="text-default-600">
+                    确定要删除选中的 <span className="font-semibold text-foreground">{selectedIds.length}</span> 个转发吗？
+                  </p>
+                  <p className="text-small text-default-500 mt-2">
+                    常规删除会同步删除节点端服务；节点离线时会失败，可勾选下方“强制删除”跳过节点校验。
+                  </p>
+                  <div className="flex items-center justify-between mt-3 p-3 bg-default-50 dark:bg-default-100/50 rounded border border-default-200 dark:border-default-300">
+                    <div>
+                      <div className="text-sm font-medium text-foreground">强制删除</div>
+                      <div className="text-xs text-default-500">不验证节点端服务，仅删除数据库记录</div>
+                    </div>
+                    <Switch
+                      size="sm"
+                      isSelected={batchForceDelete}
+                      onValueChange={setBatchForceDelete}
+                    />
+                  </div>
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="light" onPress={onClose}>
+                    取消
+                  </Button>
+                  <Button
+                    color="danger"
+                    onPress={confirmBatchDelete}
+                    isLoading={batchDeleting}
+                  >
+                    {batchDeleting ? '删除中...' : '确认删除'}
                   </Button>
                 </ModalFooter>
               </>

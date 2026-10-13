@@ -28,6 +28,7 @@ export const createNode = (data: any) => Network.post("/node/create", data);
 export const getNodeList = () => Network.post("/node/list");
 export const updateNode = (data: any) => Network.post("/node/update", data);
 export const deleteNode = (id: number) => Network.post("/node/delete", { id });
+export const batchDeleteNodes = (ids: number[]) => Network.post("/node/batch-delete", { ids });
 export const getNodeInstallCommand = (id: number) => Network.post("/node/install", { id });
 export const checkNodeStatus = (nodeId?: number) => {
   const params = nodeId ? { nodeId } : {};
@@ -40,12 +41,15 @@ export const getTunnelList = () => Network.post("/tunnel/list");
 export const getTunnelById = (id: number) => Network.post("/tunnel/get", { id });
 export const updateTunnel = (data: any) => Network.post("/tunnel/update", data);
 export const deleteTunnel = (id: number) => Network.post("/tunnel/delete", { id });
+export const batchDeleteTunnels = (ids: number[]) => Network.post("/tunnel/batch-delete", { ids });
 export const diagnoseTunnel = (tunnelId: number) => Network.post("/tunnel/diagnose", { tunnelId });
 
 // 用户隧道权限管理操作 - 全部使用POST请求
 export const assignUserTunnel = (data: any) => Network.post("/tunnel/user/assign", data);
 export const getUserTunnelList = (queryData: any = {}) => Network.post("/tunnel/user/list", queryData);
 export const removeUserTunnel = (params: any) => Network.post("/tunnel/user/remove", params);
+export const batchRemoveUserTunnels = (data: { userId: number; ids: number[] }) => Network.post("/tunnel/user/batch-remove", data);
+export const batchAssignUserTunnels = (data: { userId: number; tunnelIds: number[]; flow?: number; num?: number; flowResetTime?: number; expTime?: number; speedId?: number | null }) => Network.post("/tunnel/user/batch-assign", data);
 export const updateUserTunnel = (data: any) => Network.post("/tunnel/user/update", data);
 export const userTunnel = () => Network.post("/tunnel/user/tunnel");
 
@@ -54,6 +58,8 @@ export const createForward = (data: any) => Network.post("/forward/create", data
 export const getForwardList = () => Network.post("/forward/list");
 export const updateForward = (data: any) => Network.post("/forward/update", data);
 export const deleteForward = (id: number) => Network.post("/forward/delete", { id });
+export const batchDeleteForwards = (ids: number[]) => Network.post("/forward/batch-delete", { ids });
+export const batchForceDeleteForwards = (ids: number[]) => Network.post("/forward/batch-force-delete", { ids });
 export const forceDeleteForward = (id: number) => Network.post("/forward/force-delete", { id });
 
 // 转发服务控制操作 - 通过Java后端接口

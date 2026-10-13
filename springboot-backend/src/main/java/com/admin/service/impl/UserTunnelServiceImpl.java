@@ -1,10 +1,12 @@
 package com.admin.service.impl;
 
+import com.admin.common.dto.UserTunnelBatchDto;
 import com.admin.common.dto.UserTunnelDto;
 import com.admin.common.dto.UserTunnelQueryDto;
 import com.admin.common.dto.UserTunnelUpdateDto;
 import com.admin.common.dto.UserTunnelWithDetailDto;
 import com.admin.common.lang.R;
+import com.admin.common.utils.BatchResultUtil;
 import com.admin.entity.UserTunnel;
 import com.admin.mapper.TunnelMapper;
 import com.admin.mapper.UserTunnelMapper;
@@ -26,6 +28,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -138,6 +141,97 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
         // 4. 删除用户隧道权限记录
         boolean success = this.removeById(id);
         return success ? R.ok(SUCCESS_REMOVE_MSG) : R.err(ERROR_PERMISSION_NOT_FOUND);
+    }
+
+    /**
+     * 批量分配用户隧道权限
+     * 为同一用户一次性分配多个隧道，逐条复用单条分配逻辑（含查重），聚合成功/失败明细
+     *
+     * @param batchDto 批量分配数据
+     * @return 批量结果
+     */
+    @Override
+    public R batchAssignUserTunnels(UserTunnelBatchDto batchDto) {
+        if (batchDto == null || batchDto.getUserId() == null) {
+            return R.err("用户ID不能为空");
+        }
+        List<Integer> tunnelIds = batchDto.getTunnelIds();
+        if (tunnelIds == null || tunnelIds.isEmpty()) {
+            return R.err("请选择要分配的隧道");
+        }
+
+        List<Map<String, Object>> failures = new ArrayList<>();
+        int success = 0;
+        for (Integer tunnelId : tunnelIds) {
+            if (tunnelId == null) {
+                continue;
+            }
+            try {
+                UserTunnelDto dto = new UserTunnelDto();
+                dto.setUserId(batchDto.getUserId());
+                dto.setTunnelId(tunnelId);
+                dto.setFlow(batchDto.getFlow() == null ? 0L : batchDto.getFlow());
+                dto.setNum(batchDto.getNum() == null ? 0 : batchDto.getNum());
+                dto.setFlowResetTime(batchDto.getFlowResetTime() == null ? 0L : batchDto.getFlowResetTime());
+                dto.setExpTime(batchDto.getExpTime() == null ? 0L : batchDto.getExpTime());
+                dto.setSpeedId(batchDto.getSpeedId());
+
+                R result = this.assignUserTunnel(dto);
+                if (result.getCode() == 0) {
+                    success++;
+                } else {
+                    failures.add(BatchResultUtil.failure(tunnelId, result.getMsg()));
+                }
+            } catch (Exception e) {
+                failures.add(BatchResultUtil.failure(tunnelId, e.getMessage()));
+            }
+        }
+        return BatchResultUtil.result(tunnelIds.size(), success, failures);
+    }
+
+    /**
+     * 批量删除用户隧道权限
+     * 逐条校验权限归属该用户后删除（防止越权），聚合成功/失败明细
+     *
+     * @param userId 用户ID
+     * @param ids    用户隧道权限ID列表
+     * @return 批量结果
+     */
+    @Override
+    public R batchRemoveUserTunnels(Integer userId, List<Integer> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return R.err("请选择要删除的权限");
+        }
+
+        List<Map<String, Object>> failures = new ArrayList<>();
+        int success = 0;
+        for (Integer id : ids) {
+            if (id == null) {
+                continue;
+            }
+            try {
+                UserTunnel userTunnel = this.getById(id);
+                if (userTunnel == null) {
+                    failures.add(BatchResultUtil.failure(id, ERROR_PERMISSION_NOT_FOUND));
+                    continue;
+                }
+                // 归属校验：权限必须属于目标用户，避免越权删除他人权限
+                if (userId != null && !userId.equals(userTunnel.getUserId())) {
+                    failures.add(BatchResultUtil.failure(id, "该权限不属于当前用户"));
+                    continue;
+                }
+
+                R result = this.removeUserTunnel(id);
+                if (result.getCode() == 0) {
+                    success++;
+                } else {
+                    failures.add(BatchResultUtil.failure(id, result.getMsg()));
+                }
+            } catch (Exception e) {
+                failures.add(BatchResultUtil.failure(id, e.getMessage()));
+            }
+        }
+        return BatchResultUtil.result(ids.size(), success, failures);
     }
 
 

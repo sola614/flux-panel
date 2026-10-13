@@ -42,8 +42,10 @@ import {
   deleteUser,
   getTunnelList,
   assignUserTunnel,
+  batchAssignUserTunnels,
   getUserTunnelList,
   removeUserTunnel,
+  batchRemoveUserTunnels,
   updateUserTunnel,
   getSpeedLimitList,
   resetUserFlow
@@ -156,6 +158,12 @@ export default function UserPage() {
   // 删除隧道权限确认相关状态
   const { isOpen: isDeleteTunnelModalOpen, onOpen: onDeleteTunnelModalOpen, onClose: onDeleteTunnelModalClose } = useDisclosure();
   const [tunnelToDelete, setTunnelToDelete] = useState<UserTunnel | null>(null);
+
+  // 批量分配 / 批量删除隧道权限相关状态
+  const [assignTunnelIds, setAssignTunnelIds] = useState<number[]>([]);
+  const [selectedUserTunnelIds, setSelectedUserTunnelIds] = useState<number[]>([]);
+  const [isBatchRemoveTunnelModalOpen, setBatchRemoveTunnelModalOpen] = useState(false);
+  const [batchRemoving, setBatchRemoving] = useState(false);
 
   // 重置流量确认相关状态
   const { isOpen: isResetFlowModalOpen, onOpen: onResetFlowModalOpen, onClose: onResetFlowModalClose } = useDisclosure();
@@ -342,30 +350,50 @@ export default function UserPage() {
       flowResetTime: 0,
       speedId: null
     });
+    setAssignTunnelIds([]);
+    setSelectedUserTunnelIds([]);
     onTunnelModalOpen();
     loadUserTunnels(user.id);
   };
 
+  // 分配新权限（支持一次为同一用户分配多个隧道）
   const handleAssignTunnel = async () => {
-    if (!tunnelForm.tunnelId || !tunnelForm.expTime || !currentUser) {
+    if (assignTunnelIds.length === 0 || !tunnelForm.expTime || !currentUser) {
       toast.error('请填写完整信息');
       return;
     }
 
     setAssignLoading(true);
     try {
-      const response = await assignUserTunnel({
-        userId: currentUser.id,
-        tunnelId: tunnelForm.tunnelId,
+      const common = {
         flow: tunnelForm.flow,
         num: tunnelForm.num,
         expTime: tunnelForm.expTime.getTime(),
         flowResetTime: tunnelForm.flowResetTime,
-        speedId: tunnelForm.speedId
-      });
+        speedId: assignTunnelIds.length === 1 ? tunnelForm.speedId : null
+      };
+
+      const response = assignTunnelIds.length === 1
+        ? await assignUserTunnel({ userId: currentUser.id, tunnelId: assignTunnelIds[0], ...common })
+        : await batchAssignUserTunnels({ userId: currentUser.id, tunnelIds: assignTunnelIds, ...common });
 
       if (response.code === 0) {
-        toast.success('分配成功');
+        if (assignTunnelIds.length > 1) {
+          const result = response.data || {};
+          const successCount = result.success ?? 0;
+          const failedCount = result.failed ?? 0;
+          if (failedCount > 0) {
+            const reasons = (result.failures || [])
+              .map((f: any) => `#${f.id}: ${f.reason}`)
+              .join('；');
+            toast.error(`批量分配完成：成功 ${successCount} 项，失败 ${failedCount} 项。${reasons}`);
+          } else {
+            toast.success(`批量分配成功，共 ${successCount} 项`);
+          }
+        } else {
+          toast.success('分配成功');
+        }
+        setAssignTunnelIds([]);
         setTunnelForm({
           tunnelId: null,
           flow: 100,
@@ -449,6 +477,51 @@ export default function UserPage() {
     }
   };
 
+  // ============ 批量删除隧道权限 ============
+
+  const toggleUserTunnelSelect = (id: number) => {
+    setSelectedUserTunnelIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const allUserTunnelsSelected = userTunnels.length > 0 && selectedUserTunnelIds.length === userTunnels.length;
+
+  const toggleSelectAllUserTunnels = () => {
+    setSelectedUserTunnelIds(allUserTunnelsSelected ? [] : userTunnels.map(ut => ut.id));
+  };
+
+  const handleBatchRemoveTunnels = async () => {
+    if (!currentUser || selectedUserTunnelIds.length === 0) return;
+    setBatchRemoving(true);
+    try {
+      const response = await batchRemoveUserTunnels({
+        userId: currentUser.id,
+        ids: selectedUserTunnelIds
+      });
+      if (response.code === 0) {
+        const result = response.data || {};
+        const successCount = result.success ?? 0;
+        const failedCount = result.failed ?? 0;
+        if (failedCount > 0) {
+          const reasons = (result.failures || [])
+            .map((f: any) => `#${f.id}: ${f.reason}`)
+            .join('；');
+          toast.error(`批量删除完成：成功 ${successCount} 项，失败 ${failedCount} 项。${reasons}`);
+        } else {
+          toast.success(`批量删除成功，共 ${successCount} 项`);
+        }
+        setSelectedUserTunnelIds([]);
+        setBatchRemoveTunnelModalOpen(false);
+        loadUserTunnels(currentUser.id);
+      } else {
+        toast.error(response.msg || '批量删除失败');
+      }
+    } catch (error) {
+      toast.error('批量删除失败');
+    } finally {
+      setBatchRemoving(false);
+    }
+  };
+
   // 重置流量相关函数
   const handleResetFlow = (user: User) => {
     setUserToReset(user);
@@ -518,8 +591,11 @@ export default function UserPage() {
     tunnel => !userTunnels.some(ut => ut.tunnelId === tunnel.id)
   );
 
+  // 仅当只选中一个隧道时，才允许为其单独指定限速规则
+  const singleAssignTunnelId = assignTunnelIds.length === 1 ? assignTunnelIds[0] : null;
+
   const availableSpeedLimits = speedLimits.filter(
-    speedLimit => speedLimit.tunnelId === tunnelForm.tunnelId
+    speedLimit => speedLimit.tunnelId === singleAssignTunnelId
   );
 
   const editAvailableSpeedLimits = speedLimits.filter(
@@ -880,11 +956,15 @@ export default function UserPage() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Select
-                      label="选择隧道"
-                      selectedKeys={tunnelForm.tunnelId ? [tunnelForm.tunnelId.toString()] : []}
+                      label="选择隧道（可多选批量分配）"
+                      selectionMode="multiple"
+                      selectedKeys={assignTunnelIds.map(String)}
                       onSelectionChange={(keys) => {
-                        const value = Array.from(keys)[0] as string;
-                        setTunnelForm(prev => ({ ...prev, tunnelId: Number(value) || null, speedId: null }));
+                        const ids = Array.from(keys)
+                          .map(k => Number(k))
+                          .filter(n => !isNaN(n));
+                        setAssignTunnelIds(ids);
+                        setTunnelForm(prev => ({ ...prev, tunnelId: ids.length === 1 ? ids[0] : null, speedId: null }));
                       }}
                     >
                       {availableTunnels.map(tunnel => (
@@ -895,13 +975,13 @@ export default function UserPage() {
                     </Select>
                     
                     <Select
-                      label="限速规则"
+                      label="限速规则（仅单选隧道时可用）"
                       selectedKeys={tunnelForm.speedId ? [tunnelForm.speedId.toString()] : ["null"]}
                       onSelectionChange={(keys) => {
                         const value = Array.from(keys)[0] as string;
                         setTunnelForm(prev => ({ ...prev, speedId: value === "null" ? null : Number(value) }));
                       }}
-                      isDisabled={!tunnelForm.tunnelId}
+                      isDisabled={!singleAssignTunnelId}
                     >
                       {[
                         <SelectItem key="null" textValue="不限速">不限速</SelectItem>,
@@ -978,14 +1058,40 @@ export default function UserPage() {
                     onPress={handleAssignTunnel}
                     isLoading={assignLoading}
                   >
-                    分配权限
+                    {assignTunnelIds.length > 1 ? `批量分配（${assignTunnelIds.length} 个隧道）` : '分配权限'}
                   </Button>
                 </div>
               </div>
 
               {/* 已有权限部分 */}
               <div>
-                <h3 className="text-lg font-semibold mb-4">已有权限</h3>
+                <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+                  <h3 className="text-lg font-semibold">已有权限</h3>
+                  <div className="flex items-center gap-2">
+                    {userTunnels.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="flat"
+                        onPress={toggleSelectAllUserTunnels}
+                      >
+                        {allUserTunnelsSelected ? '取消全选' : '全选'}
+                      </Button>
+                    )}
+                    {selectedUserTunnelIds.length > 0 && (
+                      <>
+                        <span className="text-sm text-default-600">已选 {selectedUserTunnelIds.length} 项</span>
+                        <Button
+                          size="sm"
+                          variant="flat"
+                          color="danger"
+                          onPress={() => setBatchRemoveTunnelModalOpen(true)}
+                        >
+                          批量删除
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
                 <Table
                   aria-label="用户隧道权限列表"
                   classNames={{
@@ -994,6 +1100,7 @@ export default function UserPage() {
                   }}
                 >
                   <TableHeader>
+                    <TableColumn>选择</TableColumn>
                     <TableColumn>隧道名称</TableColumn>
                     <TableColumn>流量统计</TableColumn>
                     <TableColumn>转发数量</TableColumn>
@@ -1011,6 +1118,15 @@ export default function UserPage() {
                   >
                     {(userTunnel) => (
                       <TableRow key={userTunnel.id}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-primary cursor-pointer"
+                            checked={selectedUserTunnelIds.includes(userTunnel.id)}
+                            onChange={() => toggleUserTunnelSelect(userTunnel.id)}
+                            aria-label={`选择权限 ${userTunnel.tunnelName}`}
+                          />
+                        </TableCell>
                         <TableCell>{userTunnel.tunnelName}</TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-1">
@@ -1305,6 +1421,54 @@ export default function UserPage() {
               onPress={handleConfirmRemoveTunnel}
             >
               确认删除
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* 批量删除隧道权限确认对话框 */}
+      <Modal
+        isOpen={isBatchRemoveTunnelModalOpen}
+        onClose={() => setBatchRemoveTunnelModalOpen(false)}
+        size="2xl"
+        scrollBehavior="outside"
+        backdrop="blur"
+        placement="center"
+      >
+        <ModalContent>
+          <ModalHeader className="flex flex-col gap-1">
+            确认批量删除隧道权限
+          </ModalHeader>
+          <ModalBody>
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-danger-100 rounded-full flex items-center justify-center">
+                <DeleteIcon className="w-6 h-6 text-danger" />
+              </div>
+              <div className="flex-1">
+                <p className="text-foreground">
+                  确定要删除用户 <span className="font-semibold">{currentUser?.user}</span> 的
+                  <span className="font-semibold text-danger"> {selectedUserTunnelIds.length} </span>
+                  项隧道权限吗？
+                </p>
+                <p className="text-small text-default-500 mt-1">
+                  删除后该用户将无法使用对应隧道创建转发，且该用户在这些隧道下的转发会被一并删除，此操作不可撤销。
+                </p>
+              </div>
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="light"
+              onPress={() => setBatchRemoveTunnelModalOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              color="danger"
+              onPress={handleBatchRemoveTunnels}
+              isLoading={batchRemoving}
+            >
+              {batchRemoving ? '删除中...' : '确认删除'}
             </Button>
           </ModalFooter>
         </ModalContent>

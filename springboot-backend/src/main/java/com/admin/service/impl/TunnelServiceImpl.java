@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.admin.common.dto.*;
 
 import com.admin.common.lang.R;
+import com.admin.common.utils.BatchResultUtil;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.WebSocketServer;
@@ -244,6 +245,36 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         // 3. 执行删除操作
         boolean result = this.removeById(id);
         return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_MSG);
+    }
+
+    /**
+     * 批量删除隧道
+     * 逐条复用单条删除逻辑（含使用情况校验），聚合成功/失败明细，支持部分成功
+     *
+     * @param ids 隧道ID列表
+     * @return 批量结果
+     */
+    @Override
+    public R batchDeleteTunnels(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return R.err("请选择要删除的隧道");
+        }
+
+        List<Map<String, Object>> failures = new ArrayList<>();
+        int success = 0;
+        for (Long id : ids) {
+            try {
+                R result = this.deleteTunnel(id);
+                if (result.getCode() == 0) {
+                    success++;
+                } else {
+                    failures.add(BatchResultUtil.failure(id, result.getMsg()));
+                }
+            } catch (Exception e) {
+                failures.add(BatchResultUtil.failure(id, e.getMessage()));
+            }
+        }
+        return BatchResultUtil.result(ids.size(), success, failures);
     }
 
     /**

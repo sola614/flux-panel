@@ -5,6 +5,7 @@ import com.admin.common.annotation.RequireRole;
 import com.admin.common.dto.TunnelDto;
 import com.admin.common.dto.TunnelUpdateDto;
 
+import com.admin.common.dto.UserTunnelBatchDto;
 import com.admin.common.dto.UserTunnelDto;
 import com.admin.common.dto.UserTunnelQueryDto;
 import com.admin.common.dto.UserTunnelUpdateDto;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -65,6 +67,22 @@ public class TunnelController extends BaseController {
         return tunnelService.deleteTunnel(id);
     }
 
+    /**
+     * 批量删除隧道
+     * @param params 包含 ids 数组的参数
+     * @return 批量结果（含成功/失败明细）
+     */
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/batch-delete")
+    public R batchDelete(@RequestBody Map<String, Object> params) {
+        List<Long> ids = parseIds(params);
+        if (ids == null) {
+            return R.err("请选择要删除的隧道");
+        }
+        return tunnelService.batchDeleteTunnels(ids);
+    }
+
     // ============ 用户隧道权限管理相关方法 ============
     
     /**
@@ -102,6 +120,36 @@ public class TunnelController extends BaseController {
     public R removeUserTunnel(@RequestBody Map<String, Object> params) {
         Integer id = Integer.valueOf(params.get("id").toString());
         return userTunnelService.removeUserTunnel(id);
+    }
+
+    /**
+     * 批量分配用户隧道权限
+     * @param batchDto 批量分配数据（userId + tunnelIds + 共享配置）
+     * @return 批量结果（含成功/失败明细）
+     */
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/user/batch-assign")
+    public R batchAssignUserTunnel(@Validated @RequestBody UserTunnelBatchDto batchDto) {
+        return userTunnelService.batchAssignUserTunnels(batchDto);
+    }
+
+    /**
+     * 批量删除用户隧道权限
+     * @param params 包含 userId 与 ids 数组的参数
+     * @return 批量结果（含成功/失败明细）
+     */
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/user/batch-remove")
+    public R batchRemoveUserTunnel(@RequestBody Map<String, Object> params) {
+        List<Integer> ids = parseIntIds(params);
+        if (ids == null) {
+            return R.err("请选择要删除的权限");
+        }
+        Object userIdObj = params.get("userId");
+        Integer userId = userIdObj == null ? null : Integer.valueOf(userIdObj.toString());
+        return userTunnelService.batchRemoveUserTunnels(userId, ids);
     }
 
     

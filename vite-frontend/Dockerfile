@@ -3,8 +3,9 @@ FROM node:20.19.0 AS builder
 
 WORKDIR /app
 
+# 使用 npm ci 严格依据 package-lock.json 安装依赖，保证构建结果可复现
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 RUN npm run build

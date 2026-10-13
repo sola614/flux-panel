@@ -5,6 +5,7 @@ import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.dto.ForwardWithTunnelDto;
 import com.admin.common.dto.GostDto;
 import com.admin.common.lang.R;
+import com.admin.common.utils.BatchResultUtil;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.WebSocketServer;
@@ -320,6 +321,60 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         } else {
             return R.err("端口转发强制删除失败");
         }
+    }
+
+    /**
+     * 批量删除转发
+     * 逐条复用单条删除逻辑，聚合成功/失败明细，支持部分成功
+     *
+     * @param ids 转发ID列表
+     * @return 批量结果
+     */
+    @Override
+    public R batchDeleteForwards(List<Long> ids) {
+        return batchDelete(ids, "请选择要删除的转发", this::deleteForward);
+    }
+
+    /**
+     * 批量强制删除转发
+     * 逐条复用单条强制删除逻辑，聚合成功/失败明细
+     *
+     * @param ids 转发ID列表
+     * @return 批量结果
+     */
+    @Override
+    public R batchForceDeleteForwards(List<Long> ids) {
+        return batchDelete(ids, "请选择要删除的转发", this::forceDeleteForward);
+    }
+
+    /**
+     * 批量删除通用逻辑
+     *
+     * @param ids           待删除ID列表
+     * @param emptyMsg      空列表提示
+     * @param singleDeleter 单条删除函数
+     * @return 批量结果
+     */
+    private R batchDelete(List<Long> ids, String emptyMsg, java.util.function.Function<Long, R> singleDeleter) {
+        if (ids == null || ids.isEmpty()) {
+            return R.err(emptyMsg);
+        }
+
+        List<Map<String, Object>> failures = new ArrayList<>();
+        int success = 0;
+        for (Long id : ids) {
+            try {
+                R result = singleDeleter.apply(id);
+                if (result.getCode() == 0) {
+                    success++;
+                } else {
+                    failures.add(BatchResultUtil.failure(id, result.getMsg()));
+                }
+            } catch (Exception e) {
+                failures.add(BatchResultUtil.failure(id, e.getMessage()));
+            }
+        }
+        return BatchResultUtil.result(ids.size(), success, failures);
     }
 
     /**
