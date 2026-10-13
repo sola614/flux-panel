@@ -3,9 +3,13 @@ FROM node:20.19.0 AS builder
 
 WORKDIR /app
 
-# 使用 npm ci 严格依据 package-lock.json 安装依赖，保证构建结果可复现
+# 说明：此处必须使用 npm install，不能用 npm ci。
+#   在 Windows / macOS 上生成的 package-lock.json 会按当前平台裁剪 optionalDependencies
+#   （例如 lightningcss、@tailwindcss/oxide 的原生二进制），npm ci 严格按 lockfile 安装，
+#   在 Linux 容器里就会缺少 lightningcss.linux-x64-gnu.node 等文件，导致 vite build 失败。
+#   npm install 仍会遵循 lockfile 中已锁定的版本号，同时按目标平台补装对应的原生依赖。
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY . .
 RUN npm run build
