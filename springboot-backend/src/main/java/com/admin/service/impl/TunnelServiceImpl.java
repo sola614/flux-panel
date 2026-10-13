@@ -23,6 +23,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
  * @author QAQ
  * @since 2025-06-03
  */
+@Slf4j
 @Service
 public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> implements TunnelService {
 
@@ -231,20 +233,80 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      */
     @Override
     public R deleteTunnel(Long id) {
+        return deleteTunnel(id, false);
+    }
+
+    /**
+     * 删除隧道（支持级联）
+     *
+     * @param id      隧道ID
+     * @param cascade 为 true 时，同步删除该隧道下的所有转发与用户权限
+     * @return 删除结果响应
+     */
+    @Override
+    public R deleteTunnel(Long id, boolean cascade) {
         // 1. 验证隧道是否存在
         if (!isTunnelExists(id)) {
             return R.err(ERROR_TUNNEL_NOT_FOUND);
         }
 
-        // 2. 检查隧道使用情况
-        R usageCheckResult = checkTunnelUsage(id);
-        if (usageCheckResult.getCode() != 0) {
-            return usageCheckResult;
+        if (!cascade) {
+            // 2. 检查隧道使用情况（有转发或用户权限时拒绝删除）
+            R usageCheckResult = checkTunnelUsage(id);
+            if (usageCheckResult.getCode() != 0) {
+                return usageCheckResult;
+            }
+        } else {
+            // 2'. 级联清理：先删除该隧道下的所有转发，再清理用户权限
+            R forwardCleanResult = removeForwardsOfTunnel(id);
+            if (forwardCleanResult.getCode() != 0) {
+                return forwardCleanResult;
+            }
+            userTunnelService.remove(new QueryWrapper<UserTunnel>().eq("tunnel_id", id));
         }
 
         // 3. 执行删除操作
         boolean result = this.removeById(id);
         return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_MSG);
+    }
+
+    /**
+     * 级联删除指定隧道下的所有转发
+     * 逐条复用单条删除逻辑，保证节点端 gost 服务被同步清理；
+     * 只要有任意一条删除失败就中止并返回失败明细，避免留下孤儿转发。
+     *
+     * @param tunnelId 隧道ID
+     * @return 清理结果
+     */
+    private R removeForwardsOfTunnel(Long tunnelId) {
+        List<Forward> forwards = forwardService.list(
+                new QueryWrapper<Forward>().eq("tunnel_id", tunnelId));
+        if (forwards == null || forwards.isEmpty()) {
+            return R.ok();
+        }
+
+        List<String> failed = new ArrayList<>();
+        int forced = 0;
+        for (Forward forward : forwards) {
+            R result = forwardService.deleteForward(forward.getId());
+            if (result.getCode() != 0) {
+                // 节点离线等场景下普通删除必然失败，回退为强制删除（跳过节点端校验），
+                // 否则级联删除在节点不可用时就完全不可用。
+                R forceResult = forwardService.forceDeleteForward(forward.getId());
+                if (forceResult.getCode() == 0) {
+                    forced++;
+                } else {
+                    failed.add(forward.getName() + "（" + forceResult.getMsg() + "）");
+                }
+            }
+        }
+        if (!failed.isEmpty()) {
+            return R.err("以下转发删除失败，请先单独处理后再删除隧道：" + String.join("；", failed));
+        }
+        if (forced > 0) {
+            log.warn("隧道 {} 级联删除时，有 {} 个转发在节点端未能清理，已强制删除", tunnelId, forced);
+        }
+        return R.ok();
     }
 
     /**
@@ -256,6 +318,11 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      */
     @Override
     public R batchDeleteTunnels(List<Long> ids) {
+        return batchDeleteTunnels(ids, false);
+    }
+
+    @Override
+    public R batchDeleteTunnels(List<Long> ids, boolean cascade) {
         if (ids == null || ids.isEmpty()) {
             return R.err("请选择要删除的隧道");
         }
@@ -264,7 +331,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         int success = 0;
         for (Long id : ids) {
             try {
-                R result = this.deleteTunnel(id);
+                R result = this.deleteTunnel(id, cascade);
                 if (result.getCode() == 0) {
                     success++;
                 } else {
@@ -544,7 +611,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         
         if (forwardCount > 0) {
             String errorMsg = String.format(ERROR_FORWARDS_IN_USE, forwardCount);
-            return R.err(errorMsg);
+            return R.err(R.CODE_IN_USE, errorMsg);
         }
         
         return R.ok();
@@ -563,7 +630,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         
         if (userTunnelCount > 0) {
             String errorMsg = String.format(ERROR_USER_PERMISSIONS_IN_USE, userTunnelCount);
-            return R.err(errorMsg);
+            return R.err(R.CODE_IN_USE, errorMsg);
         }
         
         return R.ok();

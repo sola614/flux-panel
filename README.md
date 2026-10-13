@@ -83,6 +83,40 @@
 
 > ℹ️ CI 版本闸门说明：workflow 顶部 `env.VERSION` 决定是否构建镜像。**tag 已存在时不重建镜像**，仅当 `go-gost/` 有改动时才重建 GOST 二进制，否则只覆盖 Release 中的脚本与配置。因此若需重新构建并推送镜像，请**同步递增 `VERSION`**（并相应更新 `docker-compose-*.yml` 与 `install.sh` 中的版本号），或先删除同名 tag。
 
+### 6. 转发管理交互与级联删除优化
+
+**① 编辑提交后保持分组展开**
+
+- 原实现提交成功后调用 `loadData()`（带整页 loading），列表被卸载，分类视图下所有隧道分组都会折叠回默认状态。
+- 现将分组 `Accordion` 改为**受控**（`selectedKeys` + `onSelectionChange`），展开状态持久化到 `localStorage`（键名 `forward-expanded-tunnels`），并把提交后的刷新改为 `loadData(false)`。
+- 保存时会**自动展开该转发所属的隧道分组**，即"在 A 服务器编辑某中转配置保存后，A 服务器保持展开"。
+
+**② 删除节点 / 隧道支持级联删除关联转发**
+
+- 原逻辑是"有下级依赖即拒绝删除"：删隧道时若存在转发或用户权限会报错；删节点时若被隧道引用为入口/出口节点会报错。
+- 现为删除接口新增 `cascade` 参数（默认 `false`，保持原有安全语义），`cascade: true` 时按依赖链逐级清理：**节点 → 隧道 → 转发 → 用户权限**。
+  - `POST /api/v1/tunnel/delete`、`POST /api/v1/tunnel/batch-delete`
+  - `POST /api/v1/node/delete`、`POST /api/v1/node/batch-delete`
+- 依赖占用类错误改为返回 **`code: 409`**（`R.CODE_IN_USE`），前端据此弹出"是否同时删除关联转发"的二次确认，确认后以 `cascade: true` 重试；批量删除的失败项也支持一键级联重试。
+- 级联删除转发时优先走常规删除（会在节点端同步清理 gost 服务）；**若节点离线导致常规删除失败，则自动回退为强制删除**，避免"节点挂了就永远删不掉"。
+
+**③ 负载均衡策略**
+
+前端可选 4 种策略，最终以 `forwarder.selector.strategy` 下发给节点端 gost：
+
+| 前端选项 | 值 | gost 实现 | 实际行为 |
+|---|---|---|---|
+| 主备模式 - 自上而下 | `fifo` | `FIFOStrategy` | 固定选第一个节点；该节点失败后被剔除，自动切到下一个 |
+| 轮询模式 - 依次轮换 | `round` | `RoundRobinStrategy` | 按原子计数器依次轮换 |
+| 随机模式 - 随机选择 | `rand` | `RandomStrategy` | 加权随机（节点 `weight` 元数据，默认 1） |
+| 哈希模式 - IP 哈希 | `hash` | `HashStrategy` | 按客户端 IP 做 `crc32 % n` 取模，同一 IP 固定落到同一节点；无 hash 上下文时退化为随机 |
+
+- ⚠️ **仅在单个转发配置了多个目标地址时才生效**。只有一个目标地址时前端会把策略强制为 `fifo`，且不显示策略选择框。
+- 负载均衡的对象是**同一转发内的多个目标地址**，不是多个服务器 / 节点。
+- 失败剔除由 `maxFails: 1` + `failTimeout: 600s` 控制：节点连续失败达到阈值后，10 分钟内不再被选中。
+- 未知策略值会被 gost 回退为轮询（`default → RoundRobinStrategy`）。
+- 修复：`getStrategyDisplay` 原先缺少 `hash` 分支，导致哈希策略在卡片上显示为"未知"。
+
 ---
 
 ## 特性

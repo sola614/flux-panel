@@ -184,21 +184,69 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      */
     @Override
     public R deleteNode(Long id) {
+        return deleteNode(id, false);
+    }
+
+    /**
+     * 删除节点（支持级联）
+     *
+     * @param id      节点ID
+     * @param cascade 为 true 时，同步删除以该节点为入口/出口的隧道，以及这些隧道下的转发与用户权限
+     * @return 删除结果响应
+     */
+    @Override
+    public R deleteNode(Long id, boolean cascade) {
         // 1. 验证节点是否存在
         Node node = this.getById(id);
         if (node == null) {
             return R.err(ERROR_NODE_NOT_FOUND);
         }
 
-        // 2. 检查节点使用情况
-        R usageCheckResult = checkNodeUsage(id);
-        if (usageCheckResult.getCode() != 0) {
-            return usageCheckResult;
+        if (!cascade) {
+            // 2. 检查节点使用情况
+            R usageCheckResult = checkNodeUsage(id);
+            if (usageCheckResult.getCode() != 0) {
+                return usageCheckResult;
+            }
+        } else {
+            // 2'. 级联清理：先删除引用该节点的所有隧道（连带其转发与用户权限）
+            R tunnelCleanResult = removeTunnelsOfNode(id);
+            if (tunnelCleanResult.getCode() != 0) {
+                return tunnelCleanResult;
+            }
         }
 
         // 3. 执行删除操作
         boolean result = this.removeById(id);
         return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_MSG);
+    }
+
+    /**
+     * 级联删除引用指定节点的所有隧道
+     * 复用隧道的级联删除（连带转发与用户权限）；任一条失败即中止并返回失败明细。
+     *
+     * @param nodeId 节点ID
+     * @return 清理结果
+     */
+    private R removeTunnelsOfNode(Long nodeId) {
+        QueryWrapper<Tunnel> query = new QueryWrapper<>();
+        query.eq("in_node_id", nodeId).or().eq("out_node_id", nodeId);
+        List<Tunnel> tunnels = tunnelMapper.selectList(query);
+        if (tunnels == null || tunnels.isEmpty()) {
+            return R.ok();
+        }
+
+        List<String> failed = new ArrayList<>();
+        for (Tunnel tunnel : tunnels) {
+            R result = tunnelService.deleteTunnel(tunnel.getId(), true);
+            if (result.getCode() != 0) {
+                failed.add(tunnel.getName() + "（" + result.getMsg() + "）");
+            }
+        }
+        if (!failed.isEmpty()) {
+            return R.err("以下隧道删除失败，请先单独处理后再删除节点：" + String.join("；", failed));
+        }
+        return R.ok();
     }
 
     /**
@@ -210,6 +258,11 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      */
     @Override
     public R batchDeleteNodes(List<Long> ids) {
+        return batchDeleteNodes(ids, false);
+    }
+
+    @Override
+    public R batchDeleteNodes(List<Long> ids, boolean cascade) {
         if (ids == null || ids.isEmpty()) {
             return R.err("请选择要删除的节点");
         }
@@ -218,7 +271,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         int success = 0;
         for (Long id : ids) {
             try {
-                R result = this.deleteNode(id);
+                R result = this.deleteNode(id, cascade);
                 if (result.getCode() == 0) {
                     success++;
                 } else {
@@ -339,7 +392,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         long tunnelCount = tunnelMapper.selectCount(query);
         if (tunnelCount > 0) {
             String errorMsg = String.format(ERROR_IN_NODE_IN_USE, tunnelCount);
-            return R.err(errorMsg);
+            return R.err(R.CODE_IN_USE, errorMsg);
         }
         
         return R.ok();
@@ -358,7 +411,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         long tunnelCount = tunnelMapper.selectCount(query);
         if (tunnelCount > 0) {
             String errorMsg = String.format(ERROR_OUT_NODE_IN_USE, tunnelCount);
-            return R.err(errorMsg);
+            return R.err(R.CODE_IN_USE, errorMsg);
         }
         
         return R.ok();

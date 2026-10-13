@@ -6,6 +6,9 @@ import lombok.Data;
 @Data
 public class R {
 
+    /** 资源被下级依赖占用（前端据此提示"是否级联删除"） */
+    public static final int CODE_IN_USE = 409;
+
     private int code = 0;
     private String msg = "操作成功";
     private long ts = System.currentTimeMillis();

@@ -357,6 +357,23 @@ export default function NodePage() {
         setSelectedIds(prev => prev.filter(id => id !== nodeToDelete.id));
         setDeleteModalOpen(false);
         setNodeToDelete(null);
+      } else if (res.code === 409) {
+        // 该节点仍被隧道引用，询问是否级联删除
+        const confirmed = window.confirm(
+          `${res.msg}\n\n是否同时删除这些隧道，以及它们下面的所有转发和用户权限？\n\n⚠️ 此操作不可撤销。`
+        );
+        if (confirmed) {
+          const cascadeRes = await deleteNode(nodeToDelete.id, true);
+          if (cascadeRes.code === 0) {
+            toast.success('节点及其关联隧道、转发、权限已删除');
+            setNodeList(prev => prev.filter(n => n.id !== nodeToDelete.id));
+            setSelectedIds(prev => prev.filter(id => id !== nodeToDelete.id));
+            setDeleteModalOpen(false);
+            setNodeToDelete(null);
+          } else {
+            toast.error(cascadeRes.msg || '级联删除失败');
+          }
+        }
       } else {
         toast.error(res.msg || '删除失败');
       }
@@ -390,17 +407,37 @@ export default function NodePage() {
       const res = await batchDeleteNodes(selectedIds);
       if (res.code === 0) {
         const result = res.data || {};
-        const successCount = result.success ?? 0;
-        const failedCount = result.failed ?? 0;
+        let successCount = result.success ?? 0;
+        let failedCount = result.failed ?? 0;
+        let failedIds = (result.failures || []).map((f: any) => Number(f.id));
         if (failedCount > 0) {
           const reasons = (result.failures || [])
             .map((f: any) => `#${f.id}: ${f.reason}`)
             .join('；');
-          toast.error(`批量删除完成：成功 ${successCount} 项，失败 ${failedCount} 项。${reasons}`);
+          const confirmed = failedIds.length > 0 && window.confirm(
+            `批量删除完成：成功 ${successCount} 项，失败 ${failedCount} 项。\n${reasons}\n\n是否对失败的 ${failedIds.length} 项执行级联删除（同时删除其关联隧道、转发与用户权限）？\n\n⚠️ 此操作不可撤销。`
+          );
+          if (confirmed) {
+            const cascadeRes = await batchDeleteNodes(failedIds, true);
+            if (cascadeRes.code === 0) {
+              const cr = cascadeRes.data || {};
+              successCount += cr.success ?? 0;
+              failedCount = cr.failed ?? 0;
+              failedIds = (cr.failures || []).map((f: any) => Number(f.id));
+              if (failedCount > 0) {
+                toast.error(`级联删除后仍有 ${failedCount} 项失败，请查看失败明细`);
+              } else {
+                toast.success(`批量删除成功，共 ${successCount} 项`);
+              }
+            } else {
+              toast.error(cascadeRes.msg || '级联删除失败');
+            }
+          } else {
+            toast.error(`批量删除完成：成功 ${successCount} 项，失败 ${failedCount} 项。${reasons}`);
+          }
         } else {
           toast.success(`批量删除成功，共 ${successCount} 项`);
         }
-        const failedIds = (result.failures || []).map((f: any) => Number(f.id));
         setNodeList(prev => prev.filter(n => !selectedIds.includes(n.id) || failedIds.includes(n.id)));
         setSelectedIds([]);
         setBatchDeleteModalOpen(false);

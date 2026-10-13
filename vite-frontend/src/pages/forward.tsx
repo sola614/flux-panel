@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import type { Selection } from "@react-types/shared";
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
@@ -150,6 +151,58 @@ export default function ForwardPage() {
     }
   });
   
+  // 分组视图中已展开的隧道（持久化到 localStorage，保证编辑提交、刷新后不丢失展开状态）
+  const [expandedTunnelKeys, setExpandedTunnelKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('forward-expanded-tunnels');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // 更新展开状态并持久化
+  const persistExpandedTunnelKeys = (keys: string[]) => {
+    setExpandedTunnelKeys(keys);
+    try {
+      localStorage.setItem('forward-expanded-tunnels', JSON.stringify(keys));
+    } catch {
+      // localStorage 不可用时忽略，仅内存生效
+    }
+  };
+
+  // 确保指定隧道所在分组处于展开状态
+  const ensureTunnelExpanded = (tunnelId?: number | null) => {
+    if (!tunnelId) return;
+    const key = String(tunnelId);
+    setExpandedTunnelKeys(prev => {
+      if (prev.includes(key)) return prev;
+      const next = [...prev, key];
+      try {
+        localStorage.setItem('forward-expanded-tunnels', JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  // 某个用户卡片内隧道的展开状态变化（多张卡片共用一个集合，需按卡片内的 key 合并）
+  const handleTunnelSelectionChange = (userGroup: UserGroup, keys: Selection) => {
+    const groupKeys = new Set(userGroup.tunnelGroups.map(tg => String(tg.tunnelId)));
+    const next = new Set(expandedTunnelKeys.filter(k => !groupKeys.has(k)));
+    if (keys === 'all') {
+      groupKeys.forEach(k => next.add(k));
+    } else {
+      keys.forEach(k => {
+        const strKey = String(k);
+        if (groupKeys.has(strKey)) next.add(strKey);
+      });
+    }
+    persistExpandedTunnelKeys([...next]);
+  };
+
   // 拖拽排序相关状态
   const [forwardOrder, setForwardOrder] = useState<number[]>([]);
   
@@ -615,7 +668,10 @@ export default function ForwardPage() {
       if (res.code === 0) {
         toast.success(isEdit ? '修改成功' : '创建成功');
         setModalOpen(false);
-        loadData();
+        // 保存后保持该转发所属的分组处于展开状态
+        ensureTunnelExpanded(form.tunnelId);
+        // 用 loadData(false) 避免整页 loading 卸载列表，从而丢失 Accordion 展开状态
+        loadData(false);
       } else {
         toast.error(res.msg || '操作失败');
       }
@@ -1069,6 +1125,8 @@ export default function ForwardPage() {
         return { color: 'success', text: '轮询' };
       case 'rand':
         return { color: 'warning', text: '随机' };
+      case 'hash':
+        return { color: 'secondary', text: '哈希' };
       default:
         return { color: 'default', text: '未知' };
     }
@@ -1533,10 +1591,16 @@ export default function ForwardPage() {
                   </CardHeader>
                   
                   <CardBody className="pt-0">
-                    <Accordion variant="splitted" className="px-0">
+                    <Accordion
+                      variant="splitted"
+                      className="px-0"
+                      selectionMode="multiple"
+                      selectedKeys={expandedTunnelKeys}
+                      onSelectionChange={(keys) => handleTunnelSelectionChange(userGroup, keys)}
+                    >
                       {userGroup.tunnelGroups.map((tunnelGroup) => (
                         <AccordionItem
-                          key={tunnelGroup.tunnelId}
+                          key={String(tunnelGroup.tunnelId)}
                           aria-label={tunnelGroup.tunnelName}
                           title={
                             <div className="flex items-center justify-between w-full min-w-0 pr-4">

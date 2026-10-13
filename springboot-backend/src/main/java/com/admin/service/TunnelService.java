@@ -45,12 +45,28 @@ public interface TunnelService extends IService<Tunnel> {
     R deleteTunnel(Long id);
 
     /**
+     * 删除隧道（支持级联）
+     * @param id 隧道ID
+     * @param cascade 为 true 时，同步删除该隧道下的所有转发与用户权限
+     * @return 结果
+     */
+    R deleteTunnel(Long id, boolean cascade);
+
+    /**
      * 批量删除隧道
      * 逐条复用单条删除逻辑，聚合成功/失败明细
      * @param ids 隧道ID列表
      * @return 批量结果
      */
     R batchDeleteTunnels(java.util.List<Long> ids);
+
+    /**
+     * 批量删除隧道（支持级联）
+     * @param ids 隧道ID列表
+     * @param cascade 为 true 时，同步删除各隧道下的所有转发与用户权限
+     * @return 批量结果
+     */
+    R batchDeleteTunnels(java.util.List<Long> ids, boolean cascade);
 
     /**
      * 获取用户可用的隧道列表

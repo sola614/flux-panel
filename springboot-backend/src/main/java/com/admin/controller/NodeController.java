@@ -52,7 +52,7 @@ public class NodeController extends BaseController {
     @PostMapping("/delete")
     public R delete(@RequestBody Map<String, Object> params) {
         Long id = Long.valueOf(params.get("id").toString());
-        return nodeService.deleteNode(id);
+        return nodeService.deleteNode(id, parseCascade(params));
     }
 
     /**
@@ -68,7 +68,7 @@ public class NodeController extends BaseController {
         if (ids == null) {
             return R.err("请选择要删除的节点");
         }
-        return nodeService.batchDeleteNodes(ids);
+        return nodeService.batchDeleteNodes(ids, parseCascade(params));
     }
 
     @LogAnnotation

@@ -70,4 +70,21 @@ public class BaseController {
         return ids;
     }
 
+    /**
+     * 解析删除请求中的 cascade 标记（是否级联删除下级资源）
+     *
+     * @param params 请求参数，可包含 cascade
+     * @return true 表示级联删除；缺省或非法值均返回 false
+     */
+    protected boolean parseCascade(Map<String, Object> params) {
+        Object raw = params == null ? null : params.get("cascade");
+        if (raw == null) {
+            return false;
+        }
+        if (raw instanceof Boolean) {
+            return (Boolean) raw;
+        }
+        return "true".equalsIgnoreCase(raw.toString().trim());
+    }
+
 }

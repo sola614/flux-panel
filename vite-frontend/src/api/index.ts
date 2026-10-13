@@ -27,8 +27,8 @@ export const getUserPackageInfo = () => Network.post("/user/package");
 export const createNode = (data: any) => Network.post("/node/create", data);
 export const getNodeList = () => Network.post("/node/list");
 export const updateNode = (data: any) => Network.post("/node/update", data);
-export const deleteNode = (id: number) => Network.post("/node/delete", { id });
-export const batchDeleteNodes = (ids: number[]) => Network.post("/node/batch-delete", { ids });
+export const deleteNode = (id: number, cascade = false) => Network.post("/node/delete", { id, cascade });
+export const batchDeleteNodes = (ids: number[], cascade = false) => Network.post("/node/batch-delete", { ids, cascade });
 export const getNodeInstallCommand = (id: number) => Network.post("/node/install", { id });
 export const checkNodeStatus = (nodeId?: number) => {
   const params = nodeId ? { nodeId } : {};
@@ -40,8 +40,8 @@ export const createTunnel = (data: any) => Network.post("/tunnel/create", data);
 export const getTunnelList = () => Network.post("/tunnel/list");
 export const getTunnelById = (id: number) => Network.post("/tunnel/get", { id });
 export const updateTunnel = (data: any) => Network.post("/tunnel/update", data);
-export const deleteTunnel = (id: number) => Network.post("/tunnel/delete", { id });
-export const batchDeleteTunnels = (ids: number[]) => Network.post("/tunnel/batch-delete", { ids });
+export const deleteTunnel = (id: number, cascade = false) => Network.post("/tunnel/delete", { id, cascade });
+export const batchDeleteTunnels = (ids: number[], cascade = false) => Network.post("/tunnel/batch-delete", { ids, cascade });
 export const diagnoseTunnel = (tunnelId: number) => Network.post("/tunnel/diagnose", { tunnelId });
 
 // 用户隧道权限管理操作 - 全部使用POST请求

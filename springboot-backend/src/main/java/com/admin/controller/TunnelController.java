@@ -64,7 +64,7 @@ public class TunnelController extends BaseController {
     @PostMapping("/delete")
     public R delete(@RequestBody Map<String, Object> params) {
         Long id = Long.valueOf(params.get("id").toString());
-        return tunnelService.deleteTunnel(id);
+        return tunnelService.deleteTunnel(id, parseCascade(params));
     }
 
     /**
@@ -80,7 +80,7 @@ public class TunnelController extends BaseController {
         if (ids == null) {
             return R.err("请选择要删除的隧道");
         }
-        return tunnelService.batchDeleteTunnels(ids);
+        return tunnelService.batchDeleteTunnels(ids, parseCascade(params));
     }
 
     // ============ 用户隧道权限管理相关方法 ============
