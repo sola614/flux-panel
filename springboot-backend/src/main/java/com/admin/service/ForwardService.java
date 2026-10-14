@@ -96,6 +96,14 @@ public interface ForwardService extends IService<Forward> {
      */
     R updateForwardOrder(Map<String, Object> params);
 
+    /**
+     * 重置转发流量统计
+     * 将该转发的上下行流量清零（仅影响统计，不影响转发服务本身）
+     * @param id 转发ID
+     * @return 结果
+     */
+    R resetForwardFlow(Long id);
+
 
     void updateForwardA(Forward forward);
 }

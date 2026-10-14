@@ -118,6 +118,18 @@ public class ForwardController extends BaseController {
     }
 
     /**
+     * 重置转发流量统计
+     * @param params 包含id的参数
+     * @return 结果
+     */
+    @LogAnnotation
+    @PostMapping("/reset-flow")
+    public R resetFlow(@RequestBody Map<String, Object> params) {
+        Long id = Long.valueOf(params.get("id").toString());
+        return forwardService.resetForwardFlow(id);
+    }
+
+    /**
      * 更新转发排序
      * @param params 包含forwards数组的参数，每个元素包含id和inx
      * @return 更新结果

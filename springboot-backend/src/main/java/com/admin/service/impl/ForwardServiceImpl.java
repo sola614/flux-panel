@@ -13,6 +13,7 @@ import com.admin.entity.*;
 import com.admin.mapper.ForwardMapper;
 import com.admin.service.*;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.alibaba.fastjson.JSONObject;
 import lombok.Data;
@@ -622,6 +623,45 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             log.error("更新转发排序失败", e);
             return R.err("更新排序时发生错误: " + e.getMessage());
         }
+    }
+
+    /**
+     * 重置转发流量统计
+     * 仅将该转发的上下行流量清零，不影响转发服务本身（不会重建/重启 gost 服务）
+     *
+     * @param id 转发ID
+     * @return 结果
+     */
+    @Override
+    public R resetForwardFlow(Long id) {
+        // 1. 获取当前用户信息
+        UserInfo currentUser = getCurrentUserInfo();
+
+        // 2. 检查转发是否存在且有操作权限
+        Forward forward = validateForwardExists(id, currentUser);
+        if (forward == null) {
+            return R.err("端口转发不存在");
+        }
+
+        // 3. 普通用户还需要拥有该隧道权限（与删除/编辑保持一致）
+        if (currentUser.getRoleId() != ADMIN_ROLE_ID) {
+            UserTunnel userTunnel = getUserTunnel(currentUser.getUserId(), forward.getTunnelId());
+            if (userTunnel == null) {
+                return R.err("你没有该隧道权限");
+            }
+        }
+
+        // 4. 原子更新，只清零流量字段，避免覆盖 status 等其它字段
+        UpdateWrapper<Forward> updateWrapper = new UpdateWrapper<>();
+        updateWrapper.eq("id", id).setSql("in_flow = 0, out_flow = 0");
+
+        boolean success = this.update(null, updateWrapper);
+        if (!success) {
+            return R.err("重置流量统计失败");
+        }
+
+        log.info("用户 {} 重置了转发[ID: {}]的流量统计", currentUser.getUserName(), id);
+        return R.ok("流量统计已重置");
     }
 
     /**

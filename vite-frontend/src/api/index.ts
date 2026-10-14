@@ -72,6 +72,9 @@ export const diagnoseForward = (forwardId: number) => Network.post("/forward/dia
 // 转发排序操作
 export const updateForwardOrder = (data: { forwards: Array<{ id: number; inx: number }> }) => Network.post("/forward/update-order", data);
 
+// 重置转发流量统计
+export const resetForwardFlow = (id: number) => Network.post("/forward/reset-flow", { id });
+
 // 限速规则CRUD操作 - 全部使用POST请求
 export const createSpeedLimit = (data: any) => Network.post("/speed-limit/create", data);
 export const getSpeedLimitList = () => Network.post("/speed-limit/list");

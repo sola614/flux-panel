@@ -45,7 +45,8 @@ import {
   pauseForwardService,
   resumeForwardService,
   diagnoseForward,
-  updateForwardOrder
+  updateForwardOrder,
+  resetForwardFlow
 } from "@/api";
 import { JwtUtil } from "@/utils/jwt";
 
@@ -212,6 +213,8 @@ export default function ForwardPage() {
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [diagnosisModalOpen, setDiagnosisModalOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
+  // 是否为「复制配置」流程：此时隧道需用户重新选择，且端口若在新节点不可用会自动置空
+  const [isCopy, setIsCopy] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
@@ -220,6 +223,11 @@ export default function ForwardPage() {
   const [diagnosisResult, setDiagnosisResult] = useState<DiagnosisResult | null>(null);
   const [addressModalTitle, setAddressModalTitle] = useState('');
   const [addressList, setAddressList] = useState<AddressItem[]>([]);
+
+  // 重置流量统计相关状态
+  const [resetFlowModalOpen, setResetFlowModalOpen] = useState(false);
+  const [forwardToReset, setForwardToReset] = useState<Forward | null>(null);
+  const [resetFlowLoading, setResetFlowLoading] = useState(false);
 
   // 批量操作相关状态
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -499,6 +507,7 @@ export default function ForwardPage() {
   // 新增转发
   const handleAdd = () => {
     setIsEdit(false);
+    setIsCopy(false);
     setForm({
       name: '',
       tunnelId: null,
@@ -515,6 +524,7 @@ export default function ForwardPage() {
   // 编辑转发
   const handleEdit = (forward: Forward) => {
     setIsEdit(true);
+    setIsCopy(false);
     setForm({
       id: forward.id,
       userId: forward.userId,
@@ -527,6 +537,24 @@ export default function ForwardPage() {
     });
     const tunnel = tunnels.find(t => t.id === forward.tunnelId);
     setSelectedTunnel(tunnel || null);
+    setErrors({});
+    setModalOpen(true);
+  };
+
+  // 复制配置：打开「新增」弹窗并预填原配置，仅将隧道置空，由用户选择新隧道
+  const handleCopy = (forward: Forward) => {
+    setIsEdit(false);
+    setIsCopy(true);
+    setForm({
+      // 不带 id / userId，走新增流程
+      name: forward.name,
+      tunnelId: null,
+      inPort: forward.inPort ?? null,
+      remoteAddr: forward.remoteAddr.split(',').join('\n'),
+      interfaceName: forward.interfaceName || '',
+      strategy: forward.strategy || 'fifo'
+    });
+    setSelectedTunnel(null);
     setErrors({});
     setModalOpen(true);
   };
@@ -567,6 +595,35 @@ export default function ForwardPage() {
       toast.error('删除失败');
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  // 显示重置流量统计确认
+  const handleResetFlow = (forward: Forward) => {
+    setForwardToReset(forward);
+    setResetFlowModalOpen(true);
+  };
+
+  // 确认重置流量统计
+  const confirmResetFlow = async () => {
+    if (!forwardToReset) return;
+
+    setResetFlowLoading(true);
+    try {
+      const res = await resetForwardFlow(forwardToReset.id);
+      if (res.code === 0) {
+        toast.success('流量统计已重置');
+        setResetFlowModalOpen(false);
+        setForwardToReset(null);
+        loadData(false);
+      } else {
+        toast.error(res.msg || '重置失败');
+      }
+    } catch (error) {
+      console.error('重置流量统计失败:', error);
+      toast.error('重置失败');
+    } finally {
+      setResetFlowLoading(false);
     }
   };
 
@@ -621,7 +678,22 @@ export default function ForwardPage() {
   const handleTunnelChange = (tunnelId: string) => {
     const tunnel = tunnels.find(t => t.id === parseInt(tunnelId));
     setSelectedTunnel(tunnel || null);
-    setForm(prev => ({ ...prev, tunnelId: parseInt(tunnelId) }));
+
+    // 复制配置时：入口端口在节点级别唯一，原端口很可能已被占用，
+    // 若不在新隧道入口节点的端口范围内（或已被其它转发占用），则置空改为自动分配，
+    // 这样用户只需选择隧道即可直接提交，无需再手动改端口。
+    let nextInPort = form.inPort;
+    if (isCopy && nextInPort) {
+      const outOfRange = !!(tunnel?.inNodePortSta && tunnel?.inNodePortEnd) &&
+        (nextInPort < tunnel.inNodePortSta || nextInPort > tunnel.inNodePortEnd);
+      const occupied = forwards.some(f => f.inPort === nextInPort);
+      if (outOfRange || occupied) {
+        nextInPort = null;
+        toast('原入口端口在新隧道不可用，已改为自动分配');
+      }
+    }
+
+    setForm(prev => ({ ...prev, tunnelId: parseInt(tunnelId), inPort: nextInPort }));
   };
 
   // 提交表单
@@ -1453,6 +1525,38 @@ export default function ForwardPage() {
               删除
             </Button>
           </div>
+
+          <div className="flex gap-1.5 mt-1.5">
+            <Button
+              size="sm"
+              variant="flat"
+              color="secondary"
+              onPress={() => handleCopy(forward)}
+              className="flex-1 min-h-8"
+              startContent={
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M6 2a2 2 0 00-2 2v10a2 2 0 002 2h1v-2H6V4h8v1h2V4a2 2 0 00-2-2H6z" />
+                  <path d="M8 6a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2v-8a2 2 0 00-2-2H8zm0 2h6v8H8V8z" />
+                </svg>
+              }
+            >
+              复制
+            </Button>
+            <Button
+              size="sm"
+              variant="flat"
+              color="default"
+              onPress={() => handleResetFlow(forward)}
+              className="flex-1 min-h-8"
+              startContent={
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                </svg>
+              }
+            >
+              重置流量
+            </Button>
+          </div>
         </CardBody>
       </Card>
     );
@@ -1707,10 +1811,12 @@ export default function ForwardPage() {
               <>
                 <ModalHeader className="flex flex-col gap-1">
                   <h2 className="text-xl font-bold">
-                    {isEdit ? '编辑转发' : '新增转发'}
+                    {isEdit ? '编辑转发' : (isCopy ? '复制转发配置' : '新增转发')}
                   </h2>
                   <p className="text-small text-default-500">
-                    {isEdit ? '修改现有转发配置的信息' : '创建新的转发配置'}
+                    {isEdit
+                      ? '修改现有转发配置的信息'
+                      : (isCopy ? '已保留原配置，请选择要关联的新隧道' : '创建新的转发配置')}
                   </p>
                 </ModalHeader>
                 <ModalBody>
@@ -1859,6 +1965,51 @@ export default function ForwardPage() {
                     isLoading={deleteLoading}
                   >
                     确认删除
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* 重置流量统计确认模态框 */}
+        <Modal
+          isOpen={resetFlowModalOpen}
+          onOpenChange={setResetFlowModalOpen}
+          size="2xl"
+          scrollBehavior="outside"
+          backdrop="blur"
+          placement="center"
+        >
+          <ModalContent>
+            {(onClose) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-lg font-bold text-warning">确认重置流量统计</h2>
+                </ModalHeader>
+                <ModalBody>
+                  <p className="text-default-600">
+                    确定要重置转发 <span className="font-semibold text-foreground">"{forwardToReset?.name}"</span> 的流量统计吗？
+                  </p>
+                  <p className="text-small text-default-500 mt-2">
+                    将把该转发的上行/下行流量清零，仅影响统计显示，<span className="font-semibold text-foreground">不会中断或重建转发服务</span>。
+                  </p>
+                  {forwardToReset && (
+                    <div className="text-small text-default-500 mt-1">
+                      当前统计：↑{formatFlow(forwardToReset.inFlow || 0)} / ↓{formatFlow(forwardToReset.outFlow || 0)}
+                    </div>
+                  )}
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="light" onPress={onClose}>
+                    取消
+                  </Button>
+                  <Button
+                    color="warning"
+                    onPress={confirmResetFlow}
+                    isLoading={resetFlowLoading}
+                  >
+                    确认重置
                   </Button>
                 </ModalFooter>
               </>
