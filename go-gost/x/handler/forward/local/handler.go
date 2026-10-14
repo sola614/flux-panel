@@ -210,7 +210,18 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 		ro.Host = addr
 
 		var buf bytes.Buffer
-		cc, err = h.options.Router.Dial(ctxvalue.ContextWithBuffer(ctx, &buf), network, addr)
+		dctx := ctxvalue.ContextWithBuffer(ctx, &buf)
+		// 非最后一个候选节点使用较短的拨号上限：黑洞节点（丢包 / 无响应）会让
+		// TCP 连接一直挂到 Router 的默认超时（15s），导致首次连接直接超时失败。
+		// 最后一个候选节点仍用 Router 的正常超时，保证"慢但可用"的节点能连上。
+		if maxAttempts > 1 && attempt < maxAttempts-1 {
+			var cancel context.CancelFunc
+			dctx, cancel = context.WithTimeout(dctx, failoverDialTimeout)
+			cc, err = h.options.Router.Dial(dctx, network, addr)
+			cancel()
+		} else {
+			cc, err = h.options.Router.Dial(dctx, network, addr)
+		}
 		ro.Route = buf.String()
 		if err == nil {
 			if marker := target.Marker(); marker != nil {
@@ -233,6 +244,12 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 
 	return nil
 }
+
+// failoverDialTimeout 是"多候选节点"场景下非最后一个候选节点的拨号上限。
+// 黑洞节点（防火墙 DROP 而非 REJECT）不会返回 RST，TCP 连接会一直挂到 Router
+// 的默认超时（15s），使首次连接在客户端看来就是"不通"。限制为 3s 后可快速
+// 回落到下一个候选节点；最后一个候选节点不受此限制。
+const failoverDialTimeout = 3 * time.Second
 
 // nodeAttempts 返回单次连接内最多尝试的候选节点数。
 // 只有一个候选节点时只尝试一次；多节点（负载均衡 / 主备）时逐个尝试，
