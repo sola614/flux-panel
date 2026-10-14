@@ -20,6 +20,7 @@ import javax.annotation.Resource;
 import java.time.LocalDate;
 import java.util.Date;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Configuration
@@ -65,7 +66,10 @@ public class ResetFlowAsync {
             
             // 重置用户隧道流量
             resetUserTunnelFlow(currentDay, lastDayOfMonth);
-            
+
+            // 按隧道配置的重置日期，重置该隧道下所有转发的流量
+            resetForwardFlowByTunnel(currentDay, lastDayOfMonth);
+
             log.info("流量重置任务执行完成");
 
 
@@ -189,6 +193,59 @@ public class ResetFlowAsync {
         }
     }
 
+
+    /**
+     * 按隧道重置其下所有转发的流量
+     *
+     * <p>隧道上的 {@code flow_reset_time} 到达指定日期时，同步清零该隧道下
+     * 所有转发（{@code forward.tunnel_id} 匹配）的 {@code in_flow} / {@code out_flow}。
+     * 规则与用户 / 用户隧道一致：0 表示不重置，1-31 表示每月第几号，
+     * 且当"配置日期大于当月天数"时在当月最后一天执行。
+     *
+     * @param currentDay     当前日期（几号）
+     * @param lastDayOfMonth 当月最后一天
+     */
+    private void resetForwardFlowByTunnel(int currentDay, int lastDayOfMonth) {
+        try {
+            QueryWrapper<Tunnel> queryWrapper = new QueryWrapper<>();
+            queryWrapper.ne("flow_reset_time", 0); // 排除不重置的隧道
+
+            if (currentDay == lastDayOfMonth) {
+                // 今天是月末：重置日期等于今天，或配置日期大于当月天数（如 2 月配了 31 号）
+                queryWrapper.and(wrapper -> wrapper.eq("flow_reset_time", currentDay)
+                                                  .or().gt("flow_reset_time", lastDayOfMonth));
+            } else {
+                queryWrapper.eq("flow_reset_time", currentDay);
+            }
+
+            List<Tunnel> tunnelsToReset = tunnelService.list(queryWrapper);
+            if (tunnelsToReset.isEmpty()) {
+                log.info("没有需要重置转发流量的隧道");
+                return;
+            }
+
+            List<Long> tunnelIds = tunnelsToReset.stream()
+                    .map(Tunnel::getId)
+                    .collect(Collectors.toList());
+
+            log.info("找到{}个需要重置转发流量的隧道: {}", tunnelIds.size(), tunnelIds);
+
+            // 一次性原子清零这些隧道下所有转发的流量字段，避免逐条读改写
+            UpdateWrapper<Forward> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.in("tunnel_id", tunnelIds)
+                         .setSql("in_flow = 0, out_flow = 0");
+
+            boolean success = forwardService.update(null, updateWrapper);
+            if (success) {
+                log.info("隧道 {} 下的转发流量重置成功", tunnelIds);
+            } else {
+                log.info("隧道 {} 下的转发流量重置失败", tunnelIds);
+            }
+
+        } catch (Exception e) {
+            log.info("重置隧道下转发流量失败", e);
+        }
+    }
 
     public void user(){
         // 查询过期用户

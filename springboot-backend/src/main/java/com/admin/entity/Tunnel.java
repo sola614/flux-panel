@@ -55,6 +55,12 @@ public class Tunnel extends BaseEntity {
     private int flow;
 
     /**
+     * 流量重置日期（0=不重置，1-31=每月第几号）
+     * 到达该日期时，会同步清零本隧道下所有转发的流量统计
+     */
+    private Integer flowResetTime;
+
+    /**
      * 协议类型
      */
     private String protocol;

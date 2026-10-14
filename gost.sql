@@ -118,6 +118,7 @@ CREATE TABLE `tunnel` (
   `type` int(10) NOT NULL,
   `protocol` varchar(10) NOT NULL DEFAULT 'tls',
   `flow` int(10) NOT NULL,
+  `flow_reset_time` int(10) NOT NULL DEFAULT '1',
   `tcp_listen_addr` varchar(100) NOT NULL DEFAULT '[::]',
   `udp_listen_addr` varchar(100) NOT NULL DEFAULT '[::]',
   `interface_name` varchar(200) DEFAULT NULL,

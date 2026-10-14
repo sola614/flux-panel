@@ -26,7 +26,12 @@ public class TunnelDto {
     
     @NotNull(message = "流量计算类型不能为空")
     private Integer flow;
-    
+
+    // 流量重置日期：0=不重置，1-31=每月第几号，默认每月1号
+    @Min(value = 0, message = "流量重置日期不能小于0")
+    @Max(value = 31, message = "流量重置日期不能大于31")
+    private Integer flowResetTime = 1;
+
     // 流量倍率，默认为1.0
     @DecimalMin(value = "0.0", inclusive = false, message = "流量倍率必须大于0.0")
     @DecimalMax(value = "100.0", message = "流量倍率不能大于100.0")

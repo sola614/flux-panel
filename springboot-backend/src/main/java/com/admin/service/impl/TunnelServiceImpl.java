@@ -194,6 +194,13 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         existingTunnel.setTrafficRatio(tunnelUpdateDto.getTrafficRatio());
         existingTunnel.setProtocol(tunnelUpdateDto.getProtocol());
         existingTunnel.setInterfaceName(tunnelUpdateDto.getInterfaceName());
+
+        // 流量重置日期：仅当请求携带时更新，避免被意外置空
+        // （该字段只影响定时重置计划，不涉及 gost 服务，故不触发下方转发同步）
+        if (tunnelUpdateDto.getFlowResetTime() != null) {
+            existingTunnel.setFlowResetTime(tunnelUpdateDto.getFlowResetTime());
+        }
+
         this.updateById(existingTunnel);
         int err = 0;
         if (up != 0){
@@ -461,7 +468,10 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         
         // 设置流量计算类型
         tunnel.setFlow(tunnelDto.getFlow());
-        
+
+        // 流量重置日期：为空时默认每月1号（0 表示不重置）
+        tunnel.setFlowResetTime(tunnelDto.getFlowResetTime() == null ? 1 : tunnelDto.getFlowResetTime());
+
         // 设置流量倍率，如果为空则设置默认值1.0
         if (tunnelDto.getTrafficRatio() != null) {
             tunnel.setTrafficRatio(tunnelDto.getTrafficRatio());

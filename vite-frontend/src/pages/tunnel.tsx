@@ -34,6 +34,7 @@ interface Tunnel {
   udpListenAddr: string;
   interfaceName?: string;
   flow: number; // 1: 单向, 2: 双向
+  flowResetTime?: number; // 流量重置日期：0=不重置，1-31=每月第几号
   trafficRatio: number;
   status: number;
   createdTime: string;
@@ -56,6 +57,7 @@ interface TunnelForm {
   udpListenAddr: string;
   interfaceName?: string;
   flow: number;
+  flowResetTime: number;
   trafficRatio: number;
   status: number;
 }
@@ -110,6 +112,7 @@ export default function TunnelPage() {
     udpListenAddr: '[::]',
     interfaceName: '',
     flow: 1,
+    flowResetTime: 1,
     trafficRatio: 1.0,
     status: 1
   });
@@ -205,6 +208,7 @@ export default function TunnelPage() {
       udpListenAddr: '[::]',
       interfaceName: '',
       flow: 1,
+      flowResetTime: 1,
       trafficRatio: 1.0,
       status: 1
     });
@@ -226,6 +230,7 @@ export default function TunnelPage() {
       udpListenAddr: tunnel.udpListenAddr || '[::]',
       interfaceName: tunnel.interfaceName || '',
       flow: tunnel.flow,
+      flowResetTime: tunnel.flowResetTime ?? 1,
       trafficRatio: tunnel.trafficRatio,
       status: tunnel.status
     });
@@ -481,6 +486,13 @@ export default function TunnelPage() {
     }
   };
 
+  // 获取流量重置日期显示
+  const getFlowResetDisplay = (flowResetTime?: number) => {
+    if (flowResetTime === undefined || flowResetTime === null) return '每月1号重置';
+    if (flowResetTime === 0) return '不重置流量';
+    return `每月${flowResetTime}号重置`;
+  };
+
 
   // 获取连接质量
   const getQualityDisplay = (averageTime?: number, packetLoss?: number) => {
@@ -631,15 +643,20 @@ export default function TunnelPage() {
                       </div>
 
                       {/* 配置信息 */}
-                      <div className="flex justify-between items-center pt-2 border-t border-divider">
-                        <div className="text-left">
-                          <div className="text-xs font-medium text-foreground">
+                      <div className="flex justify-between items-center pt-2 border-t border-divider gap-2">
+                        <div className="text-left min-w-0">
+                          <div className="text-xs font-medium text-foreground truncate">
                             {getFlowDisplay(tunnel.flow)}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-xs font-medium text-foreground">
+                        <div className="text-center min-w-0">
+                          <div className="text-xs font-medium text-foreground truncate">
                             {tunnel.trafficRatio}x
+                          </div>
+                        </div>
+                        <div className="text-right min-w-0">
+                          <div className="text-xs font-medium text-default-600 truncate">
+                            {getFlowResetDisplay(tunnel.flowResetTime)}
                           </div>
                         </div>
                       </div>
@@ -803,6 +820,28 @@ export default function TunnelPage() {
                           </div>
                         }
                       />
+
+                      <Select
+                        label="流量重置日期"
+                        selectedKeys={[form.flowResetTime.toString()]}
+                        onSelectionChange={(keys) => {
+                          const value = Array.from(keys)[0] as string;
+                          setForm(prev => ({ ...prev, flowResetTime: Number(value) }));
+                        }}
+                        variant="bordered"
+                        description="到达该日期时，会同步重置本隧道下所有转发的流量统计"
+                      >
+                        <>
+                          <SelectItem key="0" textValue="不重置">
+                            不重置
+                          </SelectItem>
+                          {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                            <SelectItem key={day.toString()} textValue={`每月${day}号（0点重置）`}>
+                              每月{day}号（0点重置）
+                            </SelectItem>
+                          ))}
+                        </>
+                      </Select>
                     </div>
 
                     <Divider />
