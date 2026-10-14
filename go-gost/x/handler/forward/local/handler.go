@@ -176,51 +176,77 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 		}
 	}
 
-	target := &chain.Node{}
-	if h.hop != nil {
-		target = h.hop.Select(ctx,
-			hop.ProtocolSelectOption(proto),
-		)
-	}
-	if target == nil {
-		err := errors.New("node not available")
-		return err
-	}
+	// 多目标节点（负载均衡 / 主备）场景：若选中节点拨号失败，则在同一次连接内
+	// 标记该节点并重新选择下一个候选节点重试。否则"主节点已挂"时，本次连接
+	// 必然失败，用户会误以为负载均衡/故障切换没有生效。
+	maxAttempts := nodeAttempts(h.hop)
 
-	addr := target.Addr
-	if opts := target.Options(); opts != nil {
-		switch opts.Network {
-		case "unix":
-			network = opts.Network
-		default:
-			if _, _, err := net.SplitHostPort(addr); err != nil {
-				addr += ":0"
+	var cc net.Conn
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		target := &chain.Node{}
+		if h.hop != nil {
+			target = h.hop.Select(ctx,
+				hop.ProtocolSelectOption(proto),
+			)
+		}
+		if target == nil {
+			err = errors.New("node not available")
+			return err
+		}
+
+		addr := target.Addr
+		if opts := target.Options(); opts != nil {
+			switch opts.Network {
+			case "unix":
+				network = opts.Network
+			default:
+				if _, _, e := net.SplitHostPort(addr); e != nil {
+					addr += ":0"
+				}
 			}
 		}
-	}
 
-	ro.Network = network
-	ro.Host = addr
+		ro.Network = network
+		ro.Host = addr
 
-	var buf bytes.Buffer
-	cc, err := h.options.Router.Dial(ctxvalue.ContextWithBuffer(ctx, &buf), network, addr)
-	ro.Route = buf.String()
-	if err != nil {
+		var buf bytes.Buffer
+		cc, err = h.options.Router.Dial(ctxvalue.ContextWithBuffer(ctx, &buf), network, addr)
+		ro.Route = buf.String()
+		if err == nil {
+			if marker := target.Marker(); marker != nil {
+				marker.Reset()
+			}
+			break
+		}
 		// TODO: the router itself may be failed due to the failed node in the router,
 		// the dead marker may be a wrong operation.
 		if marker := target.Marker(); marker != nil {
 			marker.Mark()
 		}
-		return err
 	}
-	if marker := target.Marker(); marker != nil {
-		marker.Reset()
+	if err != nil {
+		return err
 	}
 	defer cc.Close()
 
 	xnet.Transport(conn, cc)
 
 	return nil
+}
+
+// nodeAttempts 返回单次连接内最多尝试的候选节点数。
+// 只有一个候选节点时只尝试一次；多节点（负载均衡 / 主备）时逐个尝试，
+// 配合 FailFilter 的失败标记实现"本次连接内"的故障切换。
+func nodeAttempts(h hop.Hop) int {
+	if h == nil {
+		return 1
+	}
+	if nl, ok := h.(hop.NodeList); ok {
+		if n := len(nl.Nodes()); n > 1 {
+			return n
+		}
+	}
+	return 1
 }
 
 func (h *forwardHandler) checkRateLimit(addr net.Addr) bool {

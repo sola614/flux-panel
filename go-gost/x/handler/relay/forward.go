@@ -7,6 +7,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/go-gost/core/chain"
+	"github.com/go-gost/core/hop"
 	"github.com/go-gost/core/limiter"
 	"github.com/go-gost/core/logger"
 	"github.com/go-gost/core/observer/stats"
@@ -22,14 +24,47 @@ func (h *relayHandler) handleForward(ctx context.Context, conn net.Conn, network
 		Version: relay.Version1,
 		Status:  relay.StatusOK,
 	}
-	target := h.hop.Select(ctx)
-	if target == nil {
-		resp.Status = relay.StatusServiceUnavailable
+
+	// 多目标节点（负载均衡 / 主备）场景：若选中节点拨号失败，则在同一次连接内
+	// 标记该节点并重新选择下一个候选节点重试，避免"主节点已挂 → 本次连接必然失败"。
+	maxAttempts := nodeAttempts(h.hop)
+
+	var (
+		target *chain.Node
+		cc     net.Conn
+		err    error
+	)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		target = h.hop.Select(ctx)
+		if target == nil {
+			resp.Status = relay.StatusServiceUnavailable
+			resp.WriteTo(conn)
+			err = errors.New("target not available")
+			log.Error(err)
+			return err
+		}
+
+		cc, err = h.options.Router.Dial(ctx, network, target.Addr)
+		if err == nil {
+			if marker := target.Marker(); marker != nil {
+				marker.Reset()
+			}
+			break
+		}
+		// TODO: the router itself may be failed due to the failed node in the router,
+		// the dead marker may be a wrong operation.
+		if marker := target.Marker(); marker != nil {
+			marker.Mark()
+		}
+	}
+	if err != nil {
+		resp.Status = relay.StatusHostUnreachable
 		resp.WriteTo(conn)
-		err := errors.New("target not available")
 		log.Error(err)
+
 		return err
 	}
+	defer cc.Close()
 
 	log = log.WithFields(map[string]any{
 		"dst": fmt.Sprintf("%s/%s", target.Addr, network),
@@ -59,25 +94,6 @@ func (h *relayHandler) handleForward(ctx context.Context, conn net.Conn, network
 			rw = stats_wrapper.WrapReadWriter(rw, pstats)
 		}
 		conn = xnet.NewReadWriteConn(rw, rw, conn)
-	}
-
-	cc, err := h.options.Router.Dial(ctx, network, target.Addr)
-	if err != nil {
-		// TODO: the router itself may be failed due to the failed node in the router,
-		// the dead marker may be a wrong operation.
-		if marker := target.Marker(); marker != nil {
-			marker.Mark()
-		}
-
-		resp.Status = relay.StatusHostUnreachable
-		resp.WriteTo(conn)
-		log.Error(err)
-
-		return err
-	}
-	defer cc.Close()
-	if marker := target.Marker(); marker != nil {
-		marker.Reset()
 	}
 
 	if h.md.noDelay {
@@ -120,4 +136,19 @@ func (h *relayHandler) handleForward(ctx context.Context, conn net.Conn, network
 	}).Debugf("%s >-< %s", conn.RemoteAddr(), target.Addr)
 
 	return nil
+}
+
+// nodeAttempts 返回单次连接内最多尝试的候选节点数。
+// 只有一个候选节点时只尝试一次；多节点（负载均衡 / 主备）时逐个尝试，
+// 配合 FailFilter 的失败标记实现"本次连接内"的故障切换。
+func nodeAttempts(h hop.Hop) int {
+	if h == nil {
+		return 1
+	}
+	if nl, ok := h.(hop.NodeList); ok {
+		if n := len(nl.Nodes()); n > 1 {
+			return n
+		}
+	}
+	return 1
 }
