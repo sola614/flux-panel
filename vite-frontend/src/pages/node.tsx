@@ -18,7 +18,8 @@ import {
   updateNode, 
   deleteNode,
   batchDeleteNodes,
-  getNodeInstallCommand
+  getNodeInstallCommand,
+  getNodeUninstallCommand
 } from "@/api";
 
 interface Node {
@@ -35,6 +36,7 @@ interface Node {
   status: number; // 1: 在线, 0: 离线
   connectionStatus: 'online' | 'offline';
   copyLoading?: boolean;
+  uninstallLoading?: boolean;
 }
 
 interface NodeForm {
@@ -80,11 +82,12 @@ export default function NodePage() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   
-  // 安装命令相关状态
+  // 安装命令相关状态（卸载命令复用同一模态框）
   const [installCommandModal, setInstallCommandModal] = useState(false);
   const [installCommand, setInstallCommand] = useState('');
+  const [commandLabel, setCommandLabel] = useState('安装');
   const [currentNodeName, setCurrentNodeName] = useState('');
-  
+
   const websocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -108,7 +111,8 @@ export default function NodePage() {
         setNodeList(res.data.map((node: any) => ({
           ...node,
           connectionStatus: node.status === 1 ? 'online' : 'offline',
-          copyLoading: false
+          copyLoading: false,
+          uninstallLoading: false
         })));
       } else {
         toast.error(res.msg || '加载节点列表失败');
@@ -466,6 +470,7 @@ export default function NodePage() {
         } catch (copyError) {
           // 复制失败，显示安装命令模态框
           setInstallCommand(res.data);
+          setCommandLabel('安装');
           setCurrentNodeName(node.name);
           setInstallCommandModal(true);
         }
@@ -481,11 +486,42 @@ export default function NodePage() {
     }
   };
 
+  // 复制卸载命令
+  const handleCopyUninstallCommand = async (node: Node) => {
+    setNodeList(prev => prev.map(n => 
+      n.id === node.id ? { ...n, uninstallLoading: true } : n
+    ));
+    
+    try {
+      const res = await getNodeUninstallCommand(node.id);
+      if (res.code === 0 && res.data) {
+        try {
+          await navigator.clipboard.writeText(res.data);
+          toast.success('卸载命令已复制到剪贴板');
+        } catch (copyError) {
+          // 复制失败，显示卸载命令模态框
+          setInstallCommand(res.data);
+          setCommandLabel('卸载');
+          setCurrentNodeName(node.name);
+          setInstallCommandModal(true);
+        }
+      } else {
+        toast.error(res.msg || '获取卸载命令失败');
+      }
+    } catch (error) {
+      toast.error('获取卸载命令失败');
+    } finally {
+      setNodeList(prev => prev.map(n => 
+        n.id === node.id ? { ...n, uninstallLoading: false } : n
+      ));
+    }
+  };
+
   // 手动复制安装命令
   const handleManualCopy = async () => {
     try {
       await navigator.clipboard.writeText(installCommand);
-      toast.success('安装命令已复制到剪贴板');
+      toast.success(`${commandLabel}命令已复制到剪贴板`);
       setInstallCommandModal(false);
     } catch (error) {
       toast.error('复制失败，请手动选择文本复制');
@@ -720,6 +756,18 @@ export default function NodePage() {
                       >
                         安装
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="flat"
+                        color="warning"
+                        onPress={() => handleCopyUninstallCommand(node)}
+                        isLoading={node.uninstallLoading}
+                        className="flex-1 min-h-8"
+                      >
+                        卸载
+                      </Button>
+                    </div>
+                    <div className="flex gap-1.5">
                       <Button
                         size="sm"
                         variant="flat"
@@ -1004,16 +1052,16 @@ export default function NodePage() {
           isOpen={installCommandModal} 
           onClose={() => setInstallCommandModal(false)}
           size="2xl"
-        scrollBehavior="outside"
-        backdrop="blur"
-        placement="center"
-        >
+      scrollBehavior="outside"
+      backdrop="blur"
+      placement="center"
+    >
           <ModalContent>
-            <ModalHeader>安装命令 - {currentNodeName}</ModalHeader>
+            <ModalHeader>{commandLabel}命令 - {currentNodeName}</ModalHeader>
             <ModalBody>
               <div className="space-y-4">
                 <p className="text-sm text-default-600">
-                  请复制以下安装命令到服务器上执行：
+                  请复制以下{commandLabel}命令到服务器上执行：
                 </p>
                 <div className="relative">
                   <Textarea

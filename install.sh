@@ -403,10 +403,12 @@ apply_mirror() {
 }
 
 # 解析命令行参数
-while getopts "a:s:" opt; do
+UNINSTALL=0
+while getopts "a:s:u" opt; do
     case "$opt" in
         a) SERVER_ADDR="$OPTARG" ;;
         s) SECRET="$OPTARG" ;;
+        u) UNINSTALL=1 ;;
         *) echo "❌ 无效参数"; exit 1 ;;
     esac
 done
@@ -563,10 +565,13 @@ update_gost() {
 uninstall_gost() {
   echo "🗑️ 开始卸载 GOST..."
 
-  confirm=$(prompt_read "确认卸载 GOST 吗？此操作将删除所有相关文件 (y/N): " "N")
-  if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-    echo "❌ 取消卸载"
-    return 0
+  # 命令行 -u 参数调用时跳过交互确认，直接卸载
+  if [ "$UNINSTALL" != "1" ]; then
+    confirm=$(prompt_read "确认卸载 GOST 吗？此操作将删除所有相关文件 (y/N): " "N")
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+      echo "❌ 取消卸载"
+      return 0
+    fi
   fi
 
   # 停止并禁用服务
@@ -597,6 +602,13 @@ main() {
   ensure_root
   detect_distro
   detect_init
+
+  # 命令行卸载（-u 参数，非交互）
+  if [ "$UNINSTALL" = "1" ]; then
+    uninstall_gost
+    delete_self
+    exit 0
+  fi
 
   # 如果提供了命令行参数，直接执行安装
   if [ -n "$SERVER_ADDR" ] && [ -n "$SECRET" ]; then

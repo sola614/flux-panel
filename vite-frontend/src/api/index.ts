@@ -30,6 +30,7 @@ export const updateNode = (data: any) => Network.post("/node/update", data);
 export const deleteNode = (id: number, cascade = false) => Network.post("/node/delete", { id, cascade });
 export const batchDeleteNodes = (ids: number[], cascade = false) => Network.post("/node/batch-delete", { ids, cascade });
 export const getNodeInstallCommand = (id: number) => Network.post("/node/install", { id });
+export const getNodeUninstallCommand = (id: number) => Network.post("/node/uninstall", { id });
 export const checkNodeStatus = (nodeId?: number) => {
   const params = nodeId ? { nodeId } : {};
   return Network.post("/node/check-status", params);

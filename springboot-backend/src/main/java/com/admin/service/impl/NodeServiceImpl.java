@@ -464,6 +464,43 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     }
 
     /**
+     * 获取节点卸载命令
+     * 根据节点信息生成对应的卸载命令
+     *
+     * @param id 节点ID
+     * @return 包含卸载命令的响应对象
+     */
+    @Override
+    public R getUninstallCommand(Long id) {
+        // 1. 验证节点是否存在
+        Node node = this.getById(id);
+        if (node == null) {
+            return R.err(ERROR_NODE_NOT_FOUND);
+        }
+
+        // 2. 构建卸载命令
+        return buildUninstallCommand();
+    }
+
+    /**
+     * 构建节点卸载命令
+     *
+     * @return 格式化的卸载命令
+     */
+    private R buildUninstallCommand() {
+        StringBuilder command = new StringBuilder();
+
+        // 第一部分：下载安装脚本（与安装命令一致）
+        command.append("curl -L https://github.com/sola614/flux-panel/releases/download/1.4.6/install.sh")
+               .append(" -o ./install.sh && chmod +x ./install.sh && ");
+
+        // 第二部分：执行卸载脚本（-u 非交互卸载）
+        command.append("./install.sh -u");
+
+        return R.ok(command.toString());
+    }
+
+    /**
      * 处理服务器地址，确保IPv6地址被方括号包裹
      * 
      * @param serverAddr 原始服务器地址，格式可能为 host:port

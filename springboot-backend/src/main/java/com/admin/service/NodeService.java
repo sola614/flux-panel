@@ -52,4 +52,11 @@ public interface NodeService extends IService<Node> {
 
     R getInstallCommand(Long id);
 
+    /**
+     * 获取节点卸载命令
+     * @param id 节点ID
+     * @return 包含卸载命令的响应对象
+     */
+    R getUninstallCommand(Long id);
+
 }

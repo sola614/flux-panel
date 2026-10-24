@@ -79,4 +79,17 @@ public class NodeController extends BaseController {
         return nodeService.getInstallCommand(id);
     }
 
+    /**
+     * 获取节点卸载命令
+     * @param params 包含 id 的参数
+     * @return 包含卸载命令的响应对象
+     */
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/uninstall")
+    public R getUninstallCommand(@RequestBody Map<String, Object> params) {
+        Long id = Long.valueOf(params.get("id").toString());
+        return nodeService.getUninstallCommand(id);
+    }
+
 }
