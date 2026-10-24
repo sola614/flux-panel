@@ -17,7 +17,7 @@
 
 INSTALL_DIR="/etc/gost"
 SERVICE_NAME="gost"
-GOST_VERSION="1.4.6"
+GOST_VERSION="1.4.7"
 REPO="sola614/flux-panel"
 # 节点进程内存软上限（防止 64M 小内存机器被 OOM kill）
 GOMEMLIMIT_VALUE="40MiB"
